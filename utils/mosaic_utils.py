@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 import datetime as dt
 from pyproj import Geod
-from DroneVision.config import FRAME_FORMAT, PIXEL_SCALE
+from config import FRAME_FORMAT, PIXEL_SCALE
 
 geod = Geod(ellps='WGS84')
 

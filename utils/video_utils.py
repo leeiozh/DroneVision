@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from tqdm import tqdm
 import datetime as dt
-from DroneVision.config import FRAME_FORMAT
+from config import FRAME_FORMAT
 
 
 def save_frames_from_video(video_path, save_dir=None, frame_interval=10, format=FRAME_FORMAT,

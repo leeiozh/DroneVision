@@ -1,5 +1,3 @@
-# config.py
-
 # видео обработки
 VIDEO_PATH = 'data/DJI_0553.MP4'
 
@@ -39,4 +37,3 @@ HORIZON_SHIFT = 0.1  # отступ от горизонта вниз в попу
 
 VIDEO_START_OFFSET_S = 0   # время в секундах от начала видео
 VIDEO_END_OFFSET_S = 180     # время конца обрезки от начала видео
-

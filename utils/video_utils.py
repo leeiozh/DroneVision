@@ -64,3 +64,32 @@ def get_meta(video_path):
     except ValueError:
         start_time = dt.datetime.strptime(start_time_str, "%Y-%m-%dT%H:%M:%SZ")
     return start_time
+
+
+def save_video_from_masks(mask_dir, out_path, fps=10):
+    """
+    Собирает видео из набора бинарных или цветных масок (PNG, JPG, TIFF).
+    Каждая маска должна иметь одинаковый размер.
+    """
+    files = sorted([os.path.join(mask_dir, f) for f in os.listdir(mask_dir)
+                    if f.lower().endswith(('.png', '.jpg', '.tif', '.tiff'))])
+    if not files:
+        print("[WARN] Нет файлов масок для сборки видео.")
+        return
+
+    frame0 = cv2.imread(files[0])
+    h, w = frame0.shape[:2]
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
+
+    for fname in files:
+        frame = cv2.imread(fname)
+        if frame is None:
+            continue
+        if len(frame.shape) == 2 or frame.shape[2] == 1:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        out.write(frame)
+
+    out.release()
+    print(f"[INFO] Видео из масок сохранено: {out_path}")

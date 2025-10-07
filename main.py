@@ -11,7 +11,8 @@ import datetime as dt
 from utils.video_utils import save_frames_from_video, get_meta
 from utils.drone_log_parser import parse_json
 from utils.projection_utils import project_frame_pitch_only
-from utils.mosaic_utils import rotate_and_shift_frames, render_projected_video_with_grid
+from utils.mosaic_utils import rotate_and_shift_frames, render_projected_video_with_grid, \
+    render_projected_image_with_grid
 
 
 def main():
@@ -93,7 +94,7 @@ def main():
     os.makedirs(SHIFTED_DIR, exist_ok=True)
     x_coords_global, y_coords_global = rotate_and_shift_frames(
         projected_dir=PROJECTED_DIR, shifted_dir=SHIFTED_DIR,
-        lats=log_int["lat"], lons=log_int["lon"], yaws=log_int["yaw"] + log_int["yaw_2"],
+        lats=log_int["lat"], lons=log_int["lon"], yaws=log_int["yaw_2"],
         resolution_m=PIXEL_SCALE, debug=False
     )
 
@@ -101,20 +102,29 @@ def main():
     if SAVE_VIDEO:
         print("[INFO] Собираем видео")
         render_projected_video_with_grid(
-            projected_dir=SHIFTED_DIR,
+            shifted_dir=SHIFTED_DIR,
             x_coords=x_coords_global,
-            y_coords=y_coords_global,
+            y_coords=y_coords_global,#np.abs(y_coords_global)[::-1],
             datetimes=frame_times,
             lats=log_int["lat"],
             lons=log_int["lon"],
             height=log_int["hgt"],
             pitches=log_int["pit_2"],
             rolls=log_int["rol_2"],
-            yaws=log_int["yaw"] + log_int["yaw_2"],
+            yaws=log_int["yaw_2"],
             out_path="mosaic_output.mp4",
             fps=fps / FRAME_INTERVAL, grid_step_m=1000,
             suffix="_proj_shft"
         )
+
+    render_projected_image_with_grid(
+        shifted_dir=SHIFTED_DIR,
+        x_coords=x_coords_global,
+        y_coords=y_coords_global,
+        out_path="mosaic_output.png",
+        grid_step_m=2000,
+        suffix="_proj_shft"
+    )
 
 
 if __name__ == "__main__":

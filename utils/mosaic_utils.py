@@ -110,15 +110,16 @@ def rotate_and_shift_frames(
 
 
 def render_projected_video_with_grid(
-        projected_dir,
+        shifted_dir,
         x_coords, y_coords,
         datetimes, lats, lons, height, pitches, rolls, yaws,
         out_path="mosaic_output.mp4",
         fps=1, grid_step_m=50,
         suffix="_proj_shft"
 ):
-    file_names = sorted([f for f in os.listdir(projected_dir) if f.endswith(suffix + "." + FRAME_FORMAT)])
-    file_paths = [os.path.join(projected_dir, f) for f in file_names]
+    y_coords = y_coords
+    file_names = sorted([f for f in os.listdir(shifted_dir) if f.endswith(suffix + "." + FRAME_FORMAT)])
+    file_paths = [os.path.join(shifted_dir, f) for f in file_names]
 
     sample = cv2.imread(file_paths[0])
     H, W = sample.shape[:2]
@@ -160,7 +161,7 @@ def render_projected_video_with_grid(
 
         # текст
         log_lines = [
-            dt.datetime.fromtimestamp(datetimes[i]).strftime("%Y-%m-%d %H:%M:%S"),
+            dt.datetime.fromtimestamp(datetimes[i]).strftime("%Y-%m-%d %H:%M:%S.%f")[:-5],
             f"lat:  {lats[i]:.6f}",
             f"lon:  {lons[i]:.6f}",
             f"alt:  {height[i]:.1f} m",
@@ -169,8 +170,10 @@ def render_projected_video_with_grid(
             f"yaw:  {yaws[i]:.1f}^o"
         ]
 
+        scale = H * 0.05
+
         for j, text in enumerate(log_lines):
-            y_pos = H - 10 - (len(log_lines) - 1 - j) * 100
+            y_pos = H - 10 - int((len(log_lines) - 1 - j) * scale)
             cv2.putText(canvas, text, (int(W * 0.1), y_pos), font, font_scale * 1.2, (255, 255, 255), thickness)
 
         # --- оставить только красный канал и увеличить контраст ---
@@ -180,7 +183,72 @@ def render_projected_video_with_grid(
         #     red = 255 * red / red.max()
         # red = red.astype(np.uint8)
         # canvas = cv2.merge([red, red, red])
-        # writer.write(canvas)
+        writer.write(canvas)
 
     writer.release()
     print(f"[INFO] Видео сохранено в {out_path}")
+
+
+def render_projected_image_with_grid(
+        shifted_dir,
+        x_coords, y_coords,
+        out_path="mosaic_output.png",
+        grid_step_m=50,
+        suffix="_proj_shft"
+):
+    file_names = sorted([f for f in os.listdir(shifted_dir) if f.endswith(suffix + "." + FRAME_FORMAT)])
+    file_paths = [os.path.join(shifted_dir, f) for f in file_names]
+
+    if not file_paths:
+        raise FileNotFoundError("Нет подходящих файлов для мозаики.")
+
+    # Загружаем первое изображение, чтобы получить размеры
+    sample = cv2.imread(file_paths[0], cv2.IMREAD_COLOR)
+    H, W = sample.shape[:2]
+    acc_image = np.zeros((H, W, 3), dtype=np.float32)
+    weight_mask = np.zeros((H, W), dtype=np.float32)
+
+    for path in tqdm(file_paths, desc="Складываем изображения"):
+        frame = cv2.imread(path).astype(np.float32)
+        # Маска ненулевых пикселей
+        mask = np.any(frame > 10, axis=2).astype(np.float32)
+        for c in range(3):
+            acc_image[:, :, c] += frame[:, :, c] * mask
+        weight_mask += mask
+
+    # Избегаем деления на ноль
+    weight_mask[weight_mask == 0] = 1.0
+    mosaic = (acc_image / weight_mask[..., None]).astype(np.uint8)
+    canvas = mosaic.copy()
+
+    # --- Рисуем сетку ---
+    x0_m = x_coords[0]
+    y0_m = y_coords[0]
+    resolution_m = (x_coords[1] - x_coords[0])
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = min(H, W) / 1000
+    thickness = int(min(H, W) / 500)
+
+    # Горизонтальные линии
+    y1_m = y_coords[-1]
+    y_lines = np.arange(np.floor(y0_m / grid_step_m) * grid_step_m,
+                        y1_m + grid_step_m, grid_step_m)
+    for y in y_lines:
+        py = int((y1_m - y) / resolution_m)
+        if 0 <= py < H:
+            cv2.line(canvas, (0, py), (W - 1, py), (255, 255, 255), 1)
+            cv2.putText(canvas, f"{int(y):+}", (10, py), font, font_scale, (255, 255, 255), thickness)
+
+    # Вертикальные линии
+    x1_m = x_coords[-1]
+    x_lines = np.arange(np.floor(x0_m / grid_step_m) * grid_step_m,
+                        x1_m + grid_step_m, grid_step_m)
+    for x in x_lines:
+        px = int((x - x0_m) / resolution_m)
+        if 0 <= px < W:
+            cv2.line(canvas, (px, 0), (px, H - 1), (255, 255, 255), 1)
+            cv2.putText(canvas, f"{int(x):+}", (px, int(0.02 * H)), font, font_scale, (255, 255, 255), thickness)
+
+    cv2.imwrite(out_path, canvas)
+    print(f"[INFO] Аппликация сохранена в {out_path}")

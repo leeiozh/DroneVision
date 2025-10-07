@@ -1,11 +1,11 @@
 # видео обработки
-VIDEO_PATH = 'data/DJI_0553.MP4'
+VIDEO_PATH = 'data/DJI_0020.MP4'
 
 # логи, время которых покрывает время видео
-LOG_PATH = 'data/logs/case1.json'
+LOG_PATH = 'data/logs/20230718T110313.json'
 
 # разница во времени между файлом логов и видео
-DELTA_HOURS = 3
+DELTA_HOURS = 3 - 0.95 / 3600
 
 # в каком формате сохранять промежуточные кадры
 FRAME_FORMAT = "png"
@@ -23,17 +23,17 @@ SHIFTED_DIR = 'output/shifted/'
 SAVE_VIDEO = True
 
 # принудительно заново извлекать кадры из видео
-FORCE_EXTRACT = False
+FORCE_EXTRACT = True
 
 # принудительно заново проецировать кадры
 FORCE_PROJECT = True
 
 # интервал для извлечения кадров (1 - каждый кадр, 30 - каждый 30ый)
-FRAME_INTERVAL = 30
+FRAME_INTERVAL = 3
 
 FOV_DEGREES = 78.8  # угол обзора камеры
-PIXEL_SCALE = 10  # желаемое разрешение метров / пиксель
-HORIZON_SHIFT = 0.1  # отступ от горизонта вниз в попугаях (нелинейный), рекомендовано от 0.05
+PIXEL_SCALE = 4  # желаемое разрешение метров / пиксель
+HORIZON_SHIFT = 0.10  # отступ от горизонта вниз в попугаях (нелинейный), рекомендовано от 0.05
 
-VIDEO_START_OFFSET_S = 0   # время в секундах от начала видео
-VIDEO_END_OFFSET_S = 180     # время конца обрезки от начала видео
+VIDEO_START_OFFSET_S = 0  # время в секундах от начала видео
+VIDEO_END_OFFSET_S = 60  # время конца обрезки от начала видео

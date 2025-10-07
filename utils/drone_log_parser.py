@@ -40,22 +40,23 @@ def parse_json(file_path, stamp=True, delta=3):
         yaw_2[i] = file["frames"][i]["gimbal"]["yaw"]  # это углы подвеса камеры относительно ДРОНА
 
     hgt = savgol_filter(hgt, window_length=10, polyorder=3)
-    pit = savgol_filter(pit, window_length=10, polyorder=3)
-    yaw = savgol_filter(yaw, window_length=10, polyorder=3)
-    rol = savgol_filter(rol, window_length=10, polyorder=3)
+    lat = savgol_filter(lat, window_length=10, polyorder=3)
+    lon = savgol_filter(lon, window_length=10, polyorder=3)
 
     # import matplotlib.pyplot as plt
     # # tim_2 = [dt.datetime.fromtimestamp(t) for t in tim]
     # ts = dt.datetime(2021, 8, 20, 20, 48, 21).timestamp()
-    # tim -= ts
-    # plt.plot(tim, hgt)
-    # plt.plot(tim, yaw)
-    # plt.plot(tim, yaw_2)
-    # plt.plot(tim, yaw + yaw_2)
+    # tim2 = tim - ts
+    # plt.plot(tim2, hgt)
+    # plt.plot(tim2, yaw, label="yaw")
+    # plt.plot(tim2, yaw_2, label="yaw2")
+    # # plt.plot(tim, yaw + yaw_2)
     # # plt.plot(tim, pit + pit_2)
     # # plt.plot(tim, pit)
-    # plt.plot(tim, pit_2)
+    # plt.plot(tim2, pit, label="pit")
+    # plt.plot(tim2, pit_2, label="pit2")
     # plt.xlim(-20, 305)
+    # plt.legend()
     # plt.show()
 
     return {"tim": tim, "lat": lat, "lon": lon, "hgt": hgt,

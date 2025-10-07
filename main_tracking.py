@@ -1,19 +1,35 @@
-# main_nadir.py
+# main_tracking.py
 
 from tqdm import tqdm
 import datetime as dt
-from config_nadir import *
-from utils.drone_log_parser import parse_json
-from utils.video_utils import save_frames_from_video, get_meta
-from utils.tracker_utils import *
+from pathlib import Path
+from config_tracking import *
+from utils.tracking_utils import *
+from utils.io_utils import parse_json, save_frames_from_video, get_meta_video
+
+
+def setup_output_dirs(base_output="output"):
+    timestamp = dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir = Path(base_output) / "runs" / timestamp
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 
 def main():
+    # === 0. Настройка директорий ===
+    RUN_DIR = setup_output_dirs()
+    FRAME_DIR = RUN_DIR / "frames"
+    MASK_DIR = RUN_DIR / "masks"
+    TRACK_DIR = RUN_DIR / "track"
+    FRAME_DIR.mkdir(exist_ok=True)
+    MASK_DIR.mkdir(exist_ok=True)
+    TRACK_DIR.mkdir(exist_ok=True)
+
     # === 1. Считываем логи
     logs = parse_json(LOG_PATH, stamp=True, delta=DELTA_HOURS)
 
     # === 2. Определяем время старта видео, сравниваем с временем старта логов
-    start_time = get_meta(VIDEO_PATH).timestamp()
+    start_time = get_meta_video(VIDEO_PATH).timestamp()
     print(f"[INFO] Видео начинается в {dt.datetime.fromtimestamp(start_time)}")
     print(f"[INFO] Логи с {dt.datetime.fromtimestamp(logs['tim'][0])} до"
           f" {dt.datetime.fromtimestamp(logs['tim'][-1])}")
@@ -38,7 +54,7 @@ def main():
         print("[INFO] Найдены сохранённые кадры. Пропускаем извлечение.")
     else:
         print(f"[INFO] Извлекаем кадры из видео с {VIDEO_START_OFFSET_S}s до {VIDEO_END_OFFSET_S}s...")
-        save_frames_from_video(VIDEO_PATH, save_dir=FRAME_DIR, frame_interval=FRAME_INTERVAL, format=FRAME_FORMAT,
+        save_frames_from_video(VIDEO_PATH, save_dir=FRAME_DIR, frame_interval=FRAME_INTERVAL,
                                start_frame=start_frame_idx, end_frame=end_frame_idx)
 
     frame_files = sorted([f for f in os.listdir(FRAME_DIR) if f.endswith(('.jpg', '.png'))])
@@ -50,34 +66,30 @@ def main():
         "[ERROR] Логи должны заканчиваться позднее видео! Проверьте FRAME_INTERVAL."
 
     # 5. Делаем трекинг льда
-    tracker = Tracker()
-    if os.path.exists(MASK_DIR):
-        shutil.rmtree(MASK_DIR)
-    if os.path.exists(TRACK_DIR):
-        shutil.rmtree(TRACK_DIR)
+    tracker = Tracker(max_match_dist_m=MAX_MATCH_DIST_M, len_tr=LEN_TR)
 
     for idx in tqdm(range(len(frame_files)), desc="Трекинг"):
         frame = cv2.imread(os.path.join(FRAME_DIR, frame_files[idx]))
 
         if SEG_MODE == "hsv":  # построение маски
-            mask = segment_ice_hsv(frame)
+            mask = segment_ice_hsv(frame, s_range=HSV_S_RANGE, v_range=HSV_V_RANGE, morph_radius=MORPH_RADIUS)
         elif SEG_MODE == "gray":
-            mask = segment_ice_gray(frame)
+            mask = segment_ice_gray(frame, blockSize=ADAPTIVE_BLOCK, C=ADAPTIVE_C, morph_radius=MORPH_RADIUS)
         else:
             raise ("SEG_MODE must be 'hsv' or 'gray'")
 
-        objects = extract_objects_from_mask(mask)  # извлечение объектов
-        tracker.update(objects, idx, frame_times[idx], log_int)  # обновление трекера
-        save_mask(idx, mask, objects)  # сохранение маски с положениями объектов
-        plot_object_positions(tracker.tracks, frame_idx=idx)  # карта положений в земной СО
+        objects = extract_objects_from_mask(mask, min_area_px=MIN_AREA_PX)  # извлечение объектов
+        tracker.update(objects, idx, frame_times[idx], log_int, W_IMG, H_IMG, FOV_DEGREES)  # обновление трекера
+        save_mask(idx, mask, objects, mask_dir=MASK_DIR)  # сохранение маски с положениями объектов
+        plot_object_positions(tracker.tracks, frame_idx=idx, track_dir=TRACK_DIR)  # карта положений в земной СО
 
     # 6. Вычисляем скорости каждого объекта
     vel_map = tracker.compute_track_mean_velocities()
-    plot_tracks_with_velocities(tracker.tracks, vel_map, SPEED_DIR)
+    plot_tracks_with_velocities(tracker.tracks, vel_map, RUN_DIR)
 
     # 7. Интерполируем поле скорости
-    grid_x, grid_y, vx_i, vy_i, speed = plot_velocity_field_contour(tracker.tracks, vel_map, SPEED_DIR)
-    save_velocity_field_to_nc(grid_x, grid_y, vx_i, vy_i, speed, log_int["lat"][0], log_int["lon"][0], SPEED_DIR)
+    grid_x, grid_y, vx_i, vy_i, speed = plot_velocity_field_contour(tracker.tracks, vel_map, RUN_DIR)
+    save_velocity_field_to_nc(grid_x, grid_y, vx_i, vy_i, speed, log_int["lat"][0], log_int["lon"][0], RUN_DIR)
 
 
 if __name__ == "__main__":

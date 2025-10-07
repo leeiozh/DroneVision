@@ -1,26 +1,11 @@
 # видео обработки
-VIDEO_PATH = '/media/leeiozh/KINGSTON/DRONE/PU2023-drone/24_07_nadir/DJI_0365.MP4'
+VIDEO_PATH = '/media/leeiozh/KINGSTON/DRONE/PU2023-drone/24_07_nadir/DJI_0296.MP4'
 
 # логи, время которых покрывает время видео
-LOG_PATH = '/media/leeiozh/KINGSTON/DRONE/PU2023-drone/logs/20230724T170938.json'
+LOG_PATH = '/media/leeiozh/KINGSTON/DRONE/PU2023-drone/logs/20230724T144443.json'
 
 # разница во времени между файлом логов и видео
 DELTA_HOURS = 3 - 0.95 / 3600
-
-# в каком формате сохранять промежуточные кадры
-FRAME_FORMAT = "png"
-
-# куда сохранять извлеченные кадры
-FRAME_DIR = 'output/frames/'
-
-# куда сохранять маски
-MASK_DIR = 'output/masks/'
-
-# куда сохранять объекты и треки
-TRACK_DIR = 'output/tracks/'
-
-# куда сохранять скорости
-SPEED_DIR = 'output/speed/'
 
 # принудительно заново извлекать кадры из видео
 FORCE_EXTRACT = True
@@ -33,7 +18,7 @@ W_IMG = 3840
 H_IMG = 2160
 
 VIDEO_START_OFFSET_S = 0  # время в секундах от начала видео
-VIDEO_END_OFFSET_S = 229  # время конца обрезки от начала видео
+VIDEO_END_OFFSET_S = 100  # время конца обрезки от начала видео
 
 SEG_MODE = "hsv"  # 'hsv' or 'gray' or 'both' (both сохранит обе маски, в обработке можно выбрать)
 HSV_S_RANGE = (0, 110)  # S channel thresholds for ice (inclusive)

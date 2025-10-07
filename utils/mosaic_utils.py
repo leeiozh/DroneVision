@@ -6,15 +6,8 @@ import numpy as np
 from tqdm import tqdm
 import datetime as dt
 from pyproj import Geod
-from config import FRAME_FORMAT, PIXEL_SCALE
 
 geod = Geod(ellps='WGS84')
-
-
-def extract_binary_mask(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray = cv2.equalizeHist(gray)
-    return gray.astype(np.float32)
 
 
 def latlon_offset_m(lat0, lon0, lat, lon):
@@ -28,14 +21,13 @@ def latlon_offset_m(lat0, lon0, lat, lon):
 def rotate_and_shift_frames(
         projected_dir, shifted_dir,
         lats, lons, yaws,
-        resolution_m=PIXEL_SCALE,
-        suffix="_proj", out_suffix="_proj_shft", debug=False
+        resolution_m, suffix="_proj", out_suffix="_proj_shft", debug=False
 ):
     csv_path = os.path.join(projected_dir, "proj_coords.csv")
     coords = np.genfromtxt(csv_path, delimiter=",", skip_header=1)
 
     # === 1. Собираем имена и кадры
-    file_names = sorted([f for f in os.listdir(projected_dir) if f.endswith(suffix + "." + FRAME_FORMAT)])
+    file_names = sorted([f for f in os.listdir(projected_dir) if f.endswith(suffix + ".png")])
     file_paths = [os.path.join(projected_dir, f) for f in file_names]
     N = len(file_paths)
 
@@ -103,7 +95,7 @@ def rotate_and_shift_frames(
         M = cv2.getAffineTransform(src_pts, dst_pts)
         canvas = cv2.warpAffine(frame, M, (out_w, out_h), flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0))
 
-        out_path = os.path.join(shifted_dir, f"frame_{i:04d}{out_suffix}.{FRAME_FORMAT}")
+        out_path = os.path.join(shifted_dir, f"frame_{i:04d}{out_suffix}.png")
         cv2.imwrite(out_path, canvas)
 
     return x_coords_global, y_coords_global
@@ -118,7 +110,7 @@ def render_projected_video_with_grid(
         suffix="_proj_shft"
 ):
     y_coords = y_coords
-    file_names = sorted([f for f in os.listdir(shifted_dir) if f.endswith(suffix + "." + FRAME_FORMAT)])
+    file_names = sorted([f for f in os.listdir(shifted_dir) if f.endswith(suffix + ".png")])
     file_paths = [os.path.join(shifted_dir, f) for f in file_names]
 
     sample = cv2.imread(file_paths[0])
@@ -196,7 +188,7 @@ def render_projected_image_with_grid(
         grid_step_m=50,
         suffix="_proj_shft"
 ):
-    file_names = sorted([f for f in os.listdir(shifted_dir) if f.endswith(suffix + "." + FRAME_FORMAT)])
+    file_names = sorted([f for f in os.listdir(shifted_dir) if f.endswith(suffix + ".png")])
     file_paths = [os.path.join(shifted_dir, f) for f in file_names]
 
     if not file_paths:
@@ -251,4 +243,4 @@ def render_projected_image_with_grid(
             cv2.putText(canvas, f"{int(x):+}", (px, int(0.02 * H)), font, font_scale, (255, 255, 255), thickness)
 
     cv2.imwrite(out_path, canvas)
-    print(f"[INFO] Аппликация сохранена в {out_path}")
+    print(f"[INFO] Мозаика сохранена в {out_path}")

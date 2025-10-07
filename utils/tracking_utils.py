@@ -5,10 +5,8 @@ matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import os
 import cv2
-import shutil
 import numpy as np
 from pyproj import Geod
-from config_nadir import *
 from netCDF4 import Dataset
 from scipy.spatial import cKDTree
 from typing import List, Tuple, Dict
@@ -31,7 +29,7 @@ def local2latlon(east, north, lat0, lon0):
     return lat.reshape(az.shape), lon.reshape(az.shape)
 
 
-def segment_ice_hsv(frame, s_range=HSV_S_RANGE, v_range=HSV_V_RANGE, morph_radius=MORPH_RADIUS):
+def segment_ice_hsv(frame, s_range, v_range, morph_radius):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
     h, s, v = cv2.split(hsv)
@@ -51,7 +49,7 @@ def segment_ice_hsv(frame, s_range=HSV_S_RANGE, v_range=HSV_V_RANGE, morph_radiu
     return (mask_opened > 0)
 
 
-def segment_ice_gray(frame, blockSize=ADAPTIVE_BLOCK, C=ADAPTIVE_C, morph_radius=MORPH_RADIUS):
+def segment_ice_gray(frame, blockSize, C, morph_radius):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     # адаптивный порог: локальный порог по блоку blockSize, с постоянной C
@@ -69,7 +67,7 @@ def segment_ice_gray(frame, blockSize=ADAPTIVE_BLOCK, C=ADAPTIVE_C, morph_radius
     return (th_opened > 0)
 
 
-def extract_objects_from_mask(mask, min_area_px=MIN_AREA_PX):
+def extract_objects_from_mask(mask, min_area_px):
     mask_u8 = mask.astype(np.uint8) * 255
 
     # находим компоненты связности (8-connectivity)
@@ -105,9 +103,10 @@ def extract_objects_from_mask(mask, min_area_px=MIN_AREA_PX):
 
 
 class Tracker:
-    def __init__(self, max_match_dist_m=MAX_MATCH_DIST_M):
+    def __init__(self, max_match_dist_m, len_tr):
         self.tracks: List[Dict] = []  # список треков
         self.max_match_dist_m = max_match_dist_m  # порог для сопоставления (метры)
+        self.len_tr = len_tr  # минимальное количество точек в треке для вычисления скорости
 
     def create_new_track(self, frame_idx: int, time_s: float, pixel_centroid: Tuple[float, float],
                          world_pos: Tuple[float, float], area_px: float):
@@ -123,7 +122,7 @@ class Tracker:
         return tr
 
     def update(self, objects_pixel: List[Dict], frame_idx: int, frame_time_s: float,
-               logs_interp: Dict[str, np.ndarray]):
+               logs_interp: Dict[str, np.ndarray], w_img, h_img, fov):
         """
           - objects_pixel: список объектов (с centroid и area)
           - frame_idx, frame_time_s: индекс и время кадра
@@ -158,7 +157,8 @@ class Tracker:
             # print(*(f"{np.rad2deg(orients[o]):.0f}" for o in orients))
             # print("cxcy", cx, cy)
             east_m, north_m = pixel_to_world_ray_intersection(cx, cy, R_total, coords,
-                                                              logs_interp["lat"][0], logs_interp["lon"][0])
+                                                              logs_interp["lat"][0], logs_interp["lon"][0],
+                                                              w_img, h_img, fov)
             current_world_positions.append((east_m, north_m))
 
         # self._save_debug_positions(current_world_positions, frame_idx)
@@ -242,7 +242,7 @@ class Tracker:
         """
         res = {}
         for tr in self.tracks:
-            if len(tr["times"]) < LEN_TR:
+            if len(tr["times"]) < self.len_tr:
                 continue
             # используем первым и последним наблюдением (можно улучшить LS)
             t0 = tr["times"][0]
@@ -312,7 +312,7 @@ def build_total_rotation_matrix(orients):
 
 # --------------------------- Pixel -> World (ray-plane) ---------------------
 def pixel_to_world_ray_intersection(u, v, R_total, coords,
-                                    lat0, lon0, img_w=W_IMG, img_h=H_IMG, fov_x_deg=FOV_DEGREES):
+                                    lat0, lon0, img_w, img_h, fov_x_deg):
     # --- 1) focal length in pixels
     f_px = (img_w / 2.0) / np.tan(np.deg2rad(fov_x_deg) / 2.0)
 
@@ -348,8 +348,8 @@ def pixel_to_world_ray_intersection(u, v, R_total, coords,
     return intersect[0], intersect[1]
 
 
-def plot_object_positions(tracks, frame_idx):
-    os.makedirs(TRACK_DIR, exist_ok=True)
+def plot_object_positions(tracks, frame_idx, track_dir):
+    os.makedirs(track_dir, exist_ok=True)
     plt.figure(figsize=(6, 6))
     plt.scatter(0, 0, c="k")
     for tr in tracks:
@@ -365,7 +365,7 @@ def plot_object_positions(tracks, frame_idx):
     plt.xlim(-500, 500)
     plt.ylim(-500, 500)
     plt.tight_layout()
-    out_path = os.path.join(TRACK_DIR, f"pos_frame_{frame_idx:04d}.png")
+    out_path = os.path.join(track_dir, f"pos_frame_{frame_idx:04d}.png")
     plt.savefig(out_path, dpi=300)
     plt.close()
 
@@ -480,8 +480,8 @@ def save_velocity_field_to_nc(grid_x, grid_y, vx_i, vy_i, speed, lat0, lon0, out
     print(f"[INFO] Поле скорости сохранено в {out_dir}")
 
 
-def save_mask(idx, mask, objects):
-    os.makedirs(MASK_DIR, exist_ok=True)
+def save_mask(idx, mask, objects, mask_dir):
+    os.makedirs(mask_dir, exist_ok=True)
     mask_gray = (mask * 255).astype(np.uint8)
     mask_vis = cv2.cvtColor(mask_gray, cv2.COLOR_GRAY2BGR)
     mask_vis[mask_gray > 0] = (255, 255, 255)
@@ -490,10 +490,10 @@ def save_mask(idx, mask, objects):
         x, y, w, h = obj["bbox"]
         cx, cy = obj["centroid"]
         obj_id = obj["label"]
-        cv2.rectangle(mask_vis, (int(x), int(y)), (int(x + w), int(y + h)), (0, 255, 0), 1)
-        cv2.circle(mask_vis, (int(cx), int(cy)), 2, (0, 0, 255), -1)
+        cv2.rectangle(mask_vis, (int(x), int(y)), (int(x + w), int(y + h)), (0, 255, 0), 2)
+        cv2.circle(mask_vis, (int(cx), int(cy)), 5, (0, 0, 255), -1)
         cv2.putText(mask_vis, f"{obj_id}", (int(cx + 5), int(cy - 5)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 1)
 
-    out_path = os.path.join(MASK_DIR, f"mask_{idx:04d}.png")
+    out_path = os.path.join(mask_dir, f"mask_{idx:04d}.png")
     cv2.imwrite(out_path, mask_vis)

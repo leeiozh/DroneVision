@@ -20,6 +20,7 @@ def setup_output_dirs(base_output="output"):
     timestamp = dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir = Path(base_output) / "runs" / timestamp
     run_dir.mkdir(parents=True, exist_ok=True)
+
     return run_dir
 
 
@@ -102,7 +103,7 @@ def main():
                 cv2.imwrite(out_path, proj)
 
     # === 8. Расширение и сдвиг проекций
-    print("\n[INFO] Расширяем и сдвигаем проекции...")
+    print("[INFO] Расширяем и сдвигаем проекции...")
     if os.path.exists(SHIFT_DIR):
         shutil.rmtree(SHIFT_DIR)
     os.makedirs(SHIFT_DIR, exist_ok=True)

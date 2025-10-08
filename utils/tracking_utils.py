@@ -16,8 +16,8 @@ GEOD = Geod(ellps='WGS84')
 
 
 def latlon2local(lat0, lon0, lat1, lon1):
-    az, _, dist = GEOD.inv(lon0, lat0, lon1, lat1, radians=True)
-    return dist * np.sin(az), dist * np.cos(az)
+    az, _, dist = GEOD.inv(lon0, lat0, lon1, lat1)
+    return dist * np.sin(np.deg2rad(az)), dist * np.cos(np.deg2rad(az))
 
 
 def local2latlon(east, north, lat0, lon0):

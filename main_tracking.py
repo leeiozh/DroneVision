@@ -18,10 +18,8 @@ def setup_output_dirs(base_output="output"):
 def main():
     # === 0. Настройка директорий ===
     RUN_DIR = setup_output_dirs()
-    FRAME_DIR = RUN_DIR / "frames"
     MASK_DIR = RUN_DIR / "masks"
     TRACK_DIR = RUN_DIR / "track"
-    FRAME_DIR.mkdir(exist_ok=True)
     MASK_DIR.mkdir(exist_ok=True)
     TRACK_DIR.mkdir(exist_ok=True)
 

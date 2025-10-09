@@ -13,6 +13,9 @@ SAVE_VIDEO = True
 # принудительно заново извлекать кадры из видео
 FORCE_EXTRACT = True
 
+# папка для извлечения кадров
+FRAME_DIR = "output/frames"
+
 # принудительно заново проецировать кадры
 FORCE_PROJECT = True
 

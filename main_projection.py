@@ -27,10 +27,8 @@ def setup_output_dirs(base_output="output"):
 def main():
     # === 0. Настройка директорий ===
     RUN_DIR = setup_output_dirs()
-    FRAME_DIR = RUN_DIR / "frames"
     PROJ_DIR = RUN_DIR / "proj"
     SHIFT_DIR = RUN_DIR / "shift"
-    FRAME_DIR.mkdir(exist_ok=True)
     PROJ_DIR.mkdir(exist_ok=True)
     SHIFT_DIR.mkdir(exist_ok=True)
 
@@ -59,6 +57,7 @@ def main():
     end_frame_idx = int(VIDEO_END_OFFSET_S * fps)
 
     # 4. Загружаем кадры
+    os.makedirs(FRAME_DIR, exist_ok=True)
     if not FORCE_EXTRACT and any(fname.endswith(('.jpg', '.png', '.tif')) for fname in os.listdir(FRAME_DIR)):
         print("[INFO] Найдены сохранённые кадры. Пропускаем извлечение.")
     else:

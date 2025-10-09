@@ -1,4 +1,5 @@
 # main_current.py
+import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import datetime as dt
@@ -6,6 +7,7 @@ from pyproj import Geod
 from pathlib import Path
 from config_current import *
 from utils.tracking_utils import *
+from tqdm.contrib.itertools import product
 from utils.io_utils import parse_json, save_frames_from_video, get_meta_video
 from utils.spectral_utils import compute_current, estimate_resolution, \
     plot_and_interpolate_velocity_field, save_velocity_field_to_nc
@@ -27,8 +29,6 @@ def calc_drone_speed(lat, lon, dt_s):
 def main():
     # === 0. Настройка директорий ===
     RUN_DIR = setup_output_dirs()
-    FRAME_DIR = RUN_DIR / "frames"
-    FRAME_DIR.mkdir(exist_ok=True)
 
     # === 1. Считываем логи
     logs = parse_json(LOG_PATH, stamp=True, delta=DELTA_HOURS)
@@ -45,7 +45,7 @@ def main():
     fps = cap.get(cv2.CAP_PROP_FPS)
     duration_s = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / fps
     cap.release()
-    print(f"[INFO] FPS видео = {fps:.2f}, длительность = {duration_s:.2f}")
+    print(f"[INFO] FPS видео = {fps:.2f}, длительность = {duration_s:.2f}s")
 
     assert 0 <= VIDEO_START_OFFSET_S < VIDEO_END_OFFSET_S <= duration_s, \
         "[ERROR] Неверные границы обрезки видео!"
@@ -75,29 +75,30 @@ def main():
     for idx in tqdm(range(len(frame_files)), desc="Подгрузка кадров"):
         frames[idx] = cv2.imread(os.path.join(FRAME_DIR, frame_files[idx]), cv2.IMREAD_GRAYSCALE)
 
-    n_frames, h, w = frames.shape
-    n_i = h // TILE_SIZE
-    n_j = w // TILE_SIZE
+    n_i = W_IMG // TILE_SIZE
+    n_j = H_IMG // TILE_SIZE
 
     coords = np.zeros(shape=(n_i, n_j, 2))
     speeds = np.zeros(shape=(n_i, n_j, 2))
+    resol = estimate_resolution(W_IMG, np.mean(log_int["hgt"]), FOV_DEGREES)
+    print(f"[INFO] Разрешение изображения {100 * resol:.0f} cм/пкс")
 
-    for i in range(n_i):
-        for j in range(n_j):
-            resol = 4 * estimate_resolution(W_IMG, np.mean(log_int["hgt"]), FOV_DEGREES)
-            x0, x1 = i * TILE_SIZE, (i + 1) * TILE_SIZE
-            y0, y1 = j * TILE_SIZE, (j + 1) * TILE_SIZE
-            coords[i, j] = [0.5 * (x0 + x1) * resol, 0.5 * (y0 + y1) * resol]
-            speeds[i, j, 0], speeds[i, j, 1] = compute_current(frames[:, x0:x1, y0:y1],
-                                                               f_max=fps / FRAME_INTERVAL,
-                                                               k_max=2 * np.pi / resol)
+    for i, j in product(range(n_i), range(n_j), desc="Обработка квадратов"):
+        x0, x1 = i * TILE_SIZE, (i + 1) * TILE_SIZE
+        y0, y1 = j * TILE_SIZE, (j + 1) * TILE_SIZE
+        coords[i, j] = [0.5 * (x0 + x1 - W_IMG) * resol, 0.5 * (y0 + y1 - H_IMG) * resol]
+        speeds[i, j, 0], speeds[i, j, 1] = compute_current(frames[:, y0:y1, x0:x1],
+                                                           f_max=fps / FRAME_INTERVAL,
+                                                           k_max=2 * np.pi / resol)  # , ij=f"{i}{j}")
 
-    drone_speed = calc_drone_speed(log_int["lat"], log_int["lon"], dt_s=FRAME_INTERVAL / fps * len(frame_times))
+    time = FRAME_INTERVAL / fps * len(frame_times)
+    drone_speed = calc_drone_speed(log_int["lat"], log_int["lon"], dt_s=time)
     print(f"[INFO] Средняя скорость дрона = {drone_speed[0]:.2f}, {drone_speed[1]:.2f}")
+    print(f"[INFO] Среднее рыскание = {np.mean(log_int["yaw"] + log_int["yaw_2"]):.0f}")
 
     # === 6. Построение поля ===
     grid_x, grid_y, vx_i, vy_i, spd = plot_and_interpolate_velocity_field(
-        coords, speeds, drone_speed[0], drone_speed[1], np.mean(log_int["yaw"] + log_int["yaw_2"]), RUN_DIR)
+        coords, speeds, time, drone_speed, np.mean(log_int["yaw"] + log_int["yaw_2"]), RUN_DIR)
 
     # === 7. Сохранение в NetCDF ===
     save_velocity_field_to_nc(grid_x, grid_y, vx_i, vy_i, spd, log_int["lat"][0], log_int["lon"][0], RUN_DIR)

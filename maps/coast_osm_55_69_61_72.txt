@@ -1,0 +1,3 @@
+OpenStreetMap land polygons (osmdata.openstreetmap.de), ODbL
+Вырезка 55..61° в.д., 69..72° с.ш.; полигонов: 411
+© OpenStreetMap contributors

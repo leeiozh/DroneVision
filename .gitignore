@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Editors, OS
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Downloaded on the first start (DroneVision.bat / python -m dronevision setup)
+bin/ffmpeg.exe
+bin/ffprobe.exe
+bin/uv/
+.dv-write-test
+
+# This computer's settings and results
+dronevision_settings.json
+output/
+runs/
+DroneVision-project/
+*.dvsession.json
+
+# Scratch files of the old stand-alone scripts
+/0020_processed.mp4
+/arr_tmp.npy
+/frame_0000.png
+/how.png
+/tmp_howm.py

@@ -74,7 +74,7 @@ def main():
         elif SEG_MODE == "gray":
             mask = segment_ice_gray(frame, blockSize=ADAPTIVE_BLOCK, C=ADAPTIVE_C, morph_radius=MORPH_RADIUS)
         else:
-            raise ("SEG_MODE must be 'hsv' or 'gray'")
+            raise ValueError("SEG_MODE must be 'hsv' or 'gray'")
 
         objects = extract_objects_from_mask(mask, min_area_px=MIN_AREA_PX)  # извлечение объектов
         tracker.update(objects, idx, frame_times[idx], log_int, W_IMG, H_IMG, FOV_DEGREES)  # обновление трекера
@@ -86,8 +86,10 @@ def main():
     plot_tracks_with_velocities(tracker.tracks, vel_map, RUN_DIR)
 
     # 7. Интерполируем поле скорости
-    grid_x, grid_y, vx_i, vy_i, speed = plot_velocity_field_contour(tracker.tracks, vel_map, RUN_DIR)
-    save_velocity_field_to_nc(grid_x, grid_y, vx_i, vy_i, speed, log_int["lat"][0], log_int["lon"][0], RUN_DIR)
+    field = plot_velocity_field_contour(tracker.tracks, vel_map, RUN_DIR)
+    if field is not None:
+        grid_x, grid_y, vx_i, vy_i, speed = field
+        save_velocity_field_to_nc(grid_x, grid_y, vx_i, vy_i, speed, log_int["lat"][0], log_int["lon"][0], RUN_DIR)
 
 
 if __name__ == "__main__":

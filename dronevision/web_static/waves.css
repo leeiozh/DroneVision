@@ -1,0 +1,30 @@
+/* Coastline over the video (coast.js) and the «Течения и спектр волн» panel (waves.js). */
+.coast-canvas, .coast-drag { position: absolute; left: 0; top: 0; width: 100%; }
+.coast-canvas { height: 100%; pointer-events: none; z-index: 2; }
+/* The bottom of the picture is left to the player's own controls. */
+.coast-drag { height: 84%; z-index: 2; cursor: grab; touch-action: none; }
+.coast-drag:active { cursor: grabbing; }
+.coast-action { margin-top: 8px; padding-top: 8px; border-top: 0; }
+.coast-action > b { font-size: 13px; }
+.coast-action #coastStatus { flex: 1 1 320px; min-width: 0; }
+.coast-action #coastOffsets { font: 12px ui-monospace, monospace; white-space: nowrap; }
+
+.waves-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 980px) { .waves-grid { grid-template-columns: 1fr; } }
+.waves-grid canvas { display: block; width: 100%; border-radius: 9px; }
+.waves-grid figure { margin: 0; min-width: 0; }
+.waves-grid figcaption { margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
+#wavesMap { background: #101514; cursor: crosshair; }
+#wavesSpectrum { background: #fff; }
+.waves-plots canvas { margin-bottom: 6px; background: #fff; }
+#wavesSummary p { margin: 0 0 6px; color: var(--ink); font-size: 13px; line-height: 1.5; }
+#wavesSummary .waves-notes { color: #a13b32; }
+#wavesSummary .waves-caveat { color: var(--muted); font-size: 12px; }
+#wavesTable { overflow-x: auto; margin: 10px 0; }
+#wavesTable table { border-collapse: collapse; width: 100%; font-size: 12px; }
+#wavesTable th, #wavesTable td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+#wavesTable th { color: var(--muted); font-weight: 600; }
+#wavesTable tr.hover td { background: #eef4ee; }
+#wavesTable i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; }
+#wavesLinks { margin: 6px 0; }
+#wavesPath { white-space: pre-wrap; }

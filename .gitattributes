@@ -1,0 +1,17 @@
+# Text files are stored with LF and checked out in the platform's style...
+* text=auto
+# ...except the files Windows itself must read: cmd.exe needs CRLF in .bat, also in a "Download ZIP" archive.
+*.bat text eol=crlf
+README_WINDOWS.txt text eol=crlf
+*.sh text eol=lf
+
+# Binary: never touch line endings
+*.exe binary
+/dji-log binary
+*.shp binary
+*.shx binary
+*.dbf binary
+*.prj binary
+*.png binary
+*.npy binary
+*.mp4 binary

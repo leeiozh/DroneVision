@@ -1,0 +1,7 @@
+# Packages of the DroneVision web application, exact versions checked together on Python 3.12.
+# DroneVision.bat installs them on Windows as ready-made wheels (nothing is compiled).
+# requirements.txt is the older, larger list for the stand-alone scripts main_*.py.
+numpy==2.5.2
+opencv-python==5.0.0.93
+pyproj==3.7.2
+certifi==2026.7.22

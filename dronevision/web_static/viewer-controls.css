@@ -1,0 +1,272 @@
+.tracks {
+  position: relative;
+}
+
+.track-tooltip {
+  position: absolute;
+  z-index: 8;
+  display: none;
+  min-width: 150px;
+  padding: 7px 9px;
+  border: 1px solid #cad3ce;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 4px 18px rgba(23, 32, 30, 0.15);
+  color: #17201e;
+  font: 11px/1.45 ui-monospace, monospace;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.selections span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.selections button {
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #cbded4;
+  color: #165b48;
+  font: 700 12px/17px system-ui;
+  cursor: pointer;
+}
+
+.selections button:hover {
+  background: #a13b32;
+  color: white;
+}
+
+.projection-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.projection-action button {
+  border: 0;
+  border-radius: 9px;
+  padding: 12px 16px;
+  background: var(--green);
+  color: white;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.mosaic-action {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 0;
+}
+
+.projection-action .secondary {
+  background: transparent;
+  color: var(--green);
+  box-shadow: inset 0 0 0 1px var(--green);
+}
+
+.projection-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.projection-field input {
+  width: 72px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  color: inherit;
+}
+
+.projection-field.refine-field input {
+  width: auto;
+  padding: 0;
+}
+
+.projection-action button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.projection-action span,
+.projection-result p,
+.projection-result code {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-working { color: #b42318 !important; font-weight: 700; }
+.status-done { color: var(--green) !important; font-weight: 700; }
+.status-error { color: #a13b32 !important; font-weight: 700; }
+
+.projection-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.projection-result h2 {
+  margin: 3px 0 12px;
+  font: 500 26px Georgia, serif;
+}
+
+.projection-result-head a {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.projection-result img {
+  display: block;
+  width: 100%;
+  max-height: 76vh;
+  object-fit: contain;
+  border-radius: 9px;
+  background: #101514;
+}
+
+.projection-gallery {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.projection-variant {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8faf7;
+}
+
+.projection-variant h3 {
+  margin: 0 0 7px;
+  font-size: 12px;
+}
+
+.projection-canvas-wrap {
+  position: relative;
+  height: min(68vh, 720px);
+  min-height: 430px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #101514;
+  cursor: grab;
+  touch-action: none;
+}
+
+.projection-canvas-wrap.dragging { cursor: grabbing; }
+.projection-canvas-wrap canvas { display: block; width: 100%; height: 100%; }
+.projection-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+.projection-tools button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+.projection-tools button.active {
+  border-color: var(--green);
+  background: var(--green);
+  color: white;
+}
+.projection-tools button[data-zoom="fit"] { min-width: 32px; padding-block: 2px; font-size: 19px; line-height: 1.1; }
+.projection-tools button[data-fullscreen] { order: 2; border-color: var(--green); background: var(--green); color: white; font-weight: 700; }
+.projection-tools button[data-fullscreen]:hover { background: #0f4939; }
+.projection-coordinates {
+  margin-left: auto;
+  order: 1;
+  font: 12px ui-monospace, monospace;
+  color: var(--ink);
+}
+
+.projection-variant p,
+.projection-variant a {
+  display: block;
+  margin: 7px 0 0;
+  font-size: 10px;
+}
+
+.projection-variant a {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.projection-result code {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.projection-variant:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  padding: 12px;
+  border: 0;
+  border-radius: 0;
+  background: #f8faf7;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.projection-variant:fullscreen > h3 {
+  margin-bottom: 2px;
+  font-size: 14px;
+}
+
+.projection-variant:fullscreen > p {
+  margin-top: 2px;
+}
+
+.projection-variant:fullscreen .projection-tools,
+.projection-variant:fullscreen .annotate-bar,
+.projection-variant:fullscreen .shape-list,
+.projection-variant:fullscreen .export-row,
+.projection-variant:fullscreen .slick-motion,
+.projection-variant:fullscreen .profile-panel {
+  flex: 0 0 auto;
+}
+
+.projection-variant:fullscreen .projection-canvas-wrap {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 180px;
+}
+
+.projection-variant:fullscreen .projection-coordinates {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .projection-action,
+  .projection-result-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .projection-gallery {
+    grid-template-columns: 1fr;
+  }
+}

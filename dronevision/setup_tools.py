@@ -85,11 +85,18 @@ def install_windows_tools(say=print, force: bool = False) -> list[str]:
 
 def check(say=print) -> list[str]:
     """Report the state of this computer; returns the problems that block work."""
+    import sys
     problems = []
+    own = Path(sys.prefix).resolve()
+    say(f"  [ok] Python {sys.version.split()[0]}: {sys.executable}"
+        + (f" (на основе {sys.base_prefix})" if sys.prefix != sys.base_prefix else ""))
     for module, package in (("numpy", "numpy"), ("cv2", "opencv-python"), ("pyproj", "pyproj")):
         try:
-            version = __import__(module).__version__
-            say(f"  [ok] {package} {version}")
+            loaded = __import__(module)
+            version = loaded.__version__
+            # A library may come from the Python installed on the computer (DroneVision.bat reuses those).
+            shared = own not in Path(loaded.__file__).resolve().parents
+            say(f"  [ok] {package} {version}" + (f" — из установленного Python: {Path(loaded.__file__).parent}" if shared else ""))
         except Exception as exc:
             problems.append(f"не установлен пакет {package} ({exc})")
     for name in ("ffmpeg", "ffprobe", "dji-log"):

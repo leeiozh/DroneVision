@@ -29,7 +29,7 @@ def _dependencies():
         import cv2
         from pyproj import Geod
     except ImportError as exc:
-        raise RuntimeError("Для обработки установите зависимости: pip install -r requirements.txt") from exc
+        raise RuntimeError("Для обработки установите зависимости: pip install -r requirements-app.txt") from exc
     return cv2, Geod(ellps="WGS84")
 
 

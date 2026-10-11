@@ -89,8 +89,13 @@ def project_to_image(east_north, altitude_m: float, width: int, height: int, foc
 
 
 def horizon_crop_row(width: int, height: int, focal_px: float, basis, altitude_m: float,
-                     max_distance_m: float = 10_000.0, extra_rows: int = 0) -> int:
-    """First image row whose left and right edge pixels hit the sea closer than ``max_distance_m``."""
+                     max_distance_m: float = 0.0, extra_rows: int = 0) -> int:
+    """First image row whose left and right edge pixels hit the sea closer than ``max_distance_m``.
+
+    No limit (0, None or inf) = the first row wholly below the geometric horizon.
+    """
+    if not max_distance_m or max_distance_m <= 0:
+        max_distance_m = np.inf
     rows = np.arange(height)
     corners = ground_points(np.stack([pixel_rays(np.zeros(height), rows, width, height, focal_px, basis),
                                       pixel_rays(np.full(height, width - 1), rows, width, height, focal_px, basis)]),
@@ -98,7 +103,7 @@ def horizon_crop_row(width: int, height: int, focal_px: float, basis, altitude_m
     distance = np.linalg.norm(corners, axis=-1).max(axis=0)
     valid = np.flatnonzero(np.isfinite(distance) & (distance <= max_distance_m))
     if not len(valid):
-        raise ValueError("Камера не видит поверхность воды ближе допустимой дальности")
+        raise ValueError("Камера не видит поверхность воды: кадр целиком выше горизонта или дальше заданной дальности")
     return int(min(valid[0] + max(extra_rows, 0), height - 2))
 
 

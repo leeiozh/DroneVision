@@ -163,7 +163,7 @@ def project_selected_frame(video_path: str, time_s: float, project_dir: str,
                            resolution_m_per_px: float = 2.0, horizon_offset_percent: float = 0.0,
                            yaw_offset_deg: float = 0.0, adjustments: dict | None = None,
                            bottom_crop_percent: float = 0.0, attitude_correction_deg=None,
-                           max_distance_m: float = MAX_GROUND_DISTANCE_M) -> dict:
+                           max_distance_m: float = 0.0) -> dict:
     """Project one video frame onto the sea surface (north up, metres from the takeoff point).
 
     ``horizontal_fov_deg`` overrides the camera profile (FOV without zoom, 0 = automatic);
@@ -204,9 +204,9 @@ def project_selected_frame(video_path: str, time_s: float, project_dir: str,
         raise RuntimeError(f"Не удалось прочитать кадр {frame_index}")
     height, width = frame.shape[:2]
 
-    # Geometric horizon plus a safety margin, then no ground point farther than ``max_distance_m``: a 10 km
-    # footprint forces ~1.4 m/px on a 10 000 px canvas, while beyond 3–5 km the georeference is poor anyway.
-    max_distance = float(np.clip(max_distance_m or MAX_GROUND_DISTANCE_M, 300.0, MAX_GROUND_DISTANCE_M))
+    # Geometric horizon plus a safety margin: everything below it is projected.  ``max_distance_m`` > 0 is an
+    # optional cut (a far footprint forces a coarse pixel on the size-limited canvas); 0 = no limit.
+    max_distance = max(float(max_distance_m or 0.0), 0.0)
     margin = int(round(height * max(0.02, horizon_offset_percent / 100)))
     crop_y = max(horizon_crop_row(width, height, focal_px, basis, altitude, np.inf, margin),
                  horizon_crop_row(width, height, focal_px, basis, altitude, max_distance))
@@ -393,7 +393,7 @@ def _pair_corrections(video_path: str, frames: list[dict], takeoff_height_m: flo
 def project_frame_pair(video_path: str, frames: list[dict], project_dir: str,
                        takeoff_height_m: float = 0.0, horizontal_fov_deg: float = 0.0,
                        resolution_m_per_px: float = 2.0, yaw_offset_deg: float = 0.0,
-                       refine: bool = True, max_distance_m: float = MAX_GROUND_DISTANCE_M) -> dict:
+                       refine: bool = True, max_distance_m: float = 0.0) -> dict:
     """Project two frames onto one identical ENU canvas for flicker comparison.
 
     With ``refine`` the two attitudes are first aligned by image features (``refine.py``): otherwise the

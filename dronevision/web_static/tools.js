@@ -133,7 +133,7 @@ function shapeArea(points) {let a = 0; for (let i = 0; i < points.length; i++) {
 function formatArea(m2) {return m2 >= 1e6 ? `${(m2 / 1e6).toFixed(2)} км²` : m2 >= 100 ? `${m2.toFixed(0)} м²` : `${m2.toFixed(1)} м²`}
 function shapeSize(shape) {return shape.type === 'polygon' ? formatArea(shapeArea(shape.points)) : formatLength(shapeLength(shape.points))}
 function shapeKind(shape) {return shape.type === 'segment' ? 'отрезок' : shape.type === 'polygon' ? 'контур' : 'ломаная'}
-function formatLength(m) {return m >= 1000 ? `${(m / 1000).toFixed(2)} км` : `${m.toFixed(0)} м`}
+function formatLength(m) {return m >= 1000 ? `${(m / 1000).toFixed(2)} км` : `${m.toFixed(m >= 100 ? 1 : 2)} м`}
 function downloadBlob(blob, name) {const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000)}
 
 // Adds the toolbar, drawing, context menu and profile chart to one projection viewer.
@@ -455,7 +455,7 @@ DV.attachTools = view => {
   // Every curve is a solid line.  What tells curves apart is the layout («Вместе» / one row per profile, coloured
   // by channel / one row per channel, coloured by profile), the switch matrix above the chart, whose cells show the
   // curve's own colour, and highlighting: pointing at a cell, a profile or a channel dims everything else.
-  panel.innerHTML = `<div class="profile-head"><b data-profile-title>Профили</b><div class="profile-modes" role="group" aria-label="Расположение профилей"><button type="button" data-profile-mode="overlay" title="Все кривые на одном графике">Вместе</button><button type="button" data-profile-mode="stacked" title="Свой график у каждого отрезка; цвет кривой — канал">По профилям</button><button type="button" data-profile-mode="channels" title="Свой график у каждого канала; цвет кривой — отрезок">По каналам</button></div><button type="button" data-profile-fit title="Вернуть всю ось расстояний">Вся длина</button><div class="profile-y-scale" role="group" aria-label="Вертикальный масштаб"><button type="button" data-profile-y-in title="Увеличить вертикальный масштаб">+</button><button type="button" data-profile-y-out title="Уменьшить вертикальный масштаб">−</button></div><span class="profile-readout"></span><button type="button" data-close title="Закрыть все профили">×</button></div><div class="profile-body"><div class="profile-channel-controls"></div><div class="profile-chart"><canvas height="190"></canvas></div></div>`;
+  panel.innerHTML = `<div class="profile-head"><b data-profile-title>Профили</b><div class="profile-modes" role="group" aria-label="Расположение профилей"><button type="button" data-profile-mode="overlay" title="Все кривые на одном графике">Вместе</button><button type="button" data-profile-mode="stacked" title="Свой график у каждого отрезка; цвет кривой — канал">По профилям</button><button type="button" data-profile-mode="channels" title="Свой график у каждого канала; цвет кривой — отрезок">По каналам</button></div><div class="profile-y-scale" role="group" aria-label="Масштаб графика"><button type="button" data-profile-fit title="Вернуть всю ось расстояний" aria-label="Вернуть всю ось расстояний">⌂</button><button type="button" data-profile-y-in title="Увеличить вертикальный масштаб">+</button><button type="button" data-profile-y-out title="Уменьшить вертикальный масштаб">−</button></div><span class="profile-readout"></span><button type="button" data-close title="Закрыть все профили">×</button></div><div class="profile-body"><div class="profile-channel-controls"></div><div class="profile-chart"><canvas height="190"></canvas></div></div>`;
   DV.attachTopResize(panel, 38);
   const chart = panel.querySelector('canvas'), readout = panel.querySelector('.profile-readout'), profileTitle = panel.querySelector('[data-profile-title]'), channelControls = panel.querySelector('.profile-channel-controls');
   const idleReadout = 'колесо — горизонтальный масштаб';
@@ -642,13 +642,16 @@ DV.attachTools = view => {
   }
   function curveFocus() {return state.profileFocus || state.profilePin}
   function curveInFocus(item, focus) {return (!focus.profile || focus.profile === item.profile) && (!focus.key || focus.key === item.key)}
-  function formatAxisDistance(distance, step) {if (Math.abs(distance) < step * .01) return '0 м'; const sign = distance > 0 ? '+' : '−', value = Math.abs(distance); return value >= 1000 ? `${sign}${(value / 1000).toFixed(step >= 1000 ? 0 : 1)} км` : `${sign}${Math.round(value)} м`}
+  // Labels keep as many decimals as the tick step needs, down to hundredths.
+  function stepDecimals(step) {return step >= 1 ? 0 : step >= .1 ? 1 : 2}
+  function formatAxisDistance(distance, step) {if (Math.abs(distance) < step * .01) return '0 м'; const sign = distance > 0 ? '+' : '−', value = Math.abs(distance); return value >= 1000 ? `${sign}${(value / 1000).toFixed(stepDecimals(step / 1000))} км` : `${sign}${value.toFixed(stepDecimals(step))} м`}
   function breakDistances(shape) {let total = 0; return shape.points.slice(1, -1).map((point, i) => {total += Math.hypot(point[0] - shape.points[i][0], point[1] - shape.points[i][1]); return total})}
   function drawAxes(g, x, y, top, bottom, minimum, maximum, verticalMinimum, verticalMaximum, showLabels = true) {
     g.font = '10px system-ui'; g.textAlign = 'right'; g.textBaseline = 'middle';
     const verticalStep = niceStep((verticalMaximum - verticalMinimum) / 4);
-    for (let v = Math.ceil(verticalMinimum / verticalStep) * verticalStep; v <= verticalMaximum + 1e-6; v += verticalStep) {g.strokeStyle = '#e6e9e5'; g.beginPath(); g.moveTo(pad.l, y(v)); g.lineTo(chart.clientWidth - pad.r, y(v)); g.stroke(); g.fillStyle = '#6d7773'; g.fillText(Math.round(v), pad.l - 6, y(v))}
-    const step = niceStep((maximum - minimum) / 6); g.textAlign = 'center'; g.textBaseline = 'top';
+    for (let v = Math.ceil(verticalMinimum / verticalStep) * verticalStep; v <= verticalMaximum + 1e-6; v += verticalStep) {g.strokeStyle = '#e6e9e5'; g.beginPath(); g.moveTo(pad.l, y(v)); g.lineTo(chart.clientWidth - pad.r, y(v)); g.stroke(); g.fillStyle = '#6d7773'; g.fillText(v.toFixed(stepDecimals(verticalStep)), pad.l - 6, y(v))}
+    // A tick about every 70 px: twice as dense as before on an ordinary panel, denser on a wide one.
+    const step = Math.max(niceStep((maximum - minimum) / Math.max(6, (chart.clientWidth - pad.l - pad.r) / 70)), .01); g.textAlign = 'center'; g.textBaseline = 'top';
     for (let d = Math.ceil(minimum / step) * step; d <= maximum + 1e-6; d += step) {const px = x(d), zero = Math.abs(d) < step * .01; g.strokeStyle = zero ? '#17201e' : '#eef0ec'; g.lineWidth = zero ? 1.6 : 1; g.beginPath(); g.moveTo(px, top); g.lineTo(px, bottom); g.stroke(); if (showLabels) {g.fillStyle = zero ? '#17201e' : '#6d7773'; g.fillText(formatAxisDistance(d, step), px, bottom + 7)}}
   }
   // Second sync point of the two-point profiles: the same bold line as the zero of the axis.
@@ -659,7 +662,7 @@ DV.attachTools = view => {
   }
   function drawBreaks(g, profile, transform, x, top, bottom) {
     const colour = DV.COLORS[profile.shape.slot][0]; g.font = '9px system-ui'; g.textAlign = 'center'; g.textBaseline = 'top'; g.lineWidth = 1;
-    breakDistances(profile.shape).forEach(distance => {const relative = toAxis(transform, distance), px = x(relative); g.strokeStyle = colour; g.globalAlpha = .45; g.beginPath(); g.moveTo(px, top); g.lineTo(px, bottom); g.stroke(); g.globalAlpha = 1; g.fillStyle = colour; g.beginPath(); g.moveTo(px, bottom); g.lineTo(px - 4, bottom - 6); g.lineTo(px + 4, bottom - 6); g.closePath(); g.fill(); g.fillText(formatAxisDistance(relative, 1), px, top - 11)});
+    breakDistances(profile.shape).forEach(distance => {const relative = toAxis(transform, distance), px = x(relative); g.strokeStyle = colour; g.globalAlpha = .45; g.beginPath(); g.moveTo(px, top); g.lineTo(px, bottom); g.stroke(); g.globalAlpha = 1; g.fillStyle = colour; g.beginPath(); g.moveTo(px, bottom); g.lineTo(px - 4, bottom - 6); g.lineTo(px + 4, bottom - 6); g.closePath(); g.fill(); g.fillText(formatAxisDistance(relative, .01), px, top - 11)});
   }
   function drawValues(g, profile, key, colour, transform, x, y, width = 1.5, top = 0, bottom = chart.clientHeight, alpha = 1) {const data = profile.data; g.save(); g.beginPath(); g.rect(pad.l, top, Math.max(1, chart.clientWidth - pad.l - pad.r), Math.max(1, bottom - top)); g.clip(); g.globalAlpha = alpha; g.strokeStyle = colour; g.lineWidth = width; g.lineJoin = 'round'; g.setLineDash([]); g.beginPath(); let open = false; data[key].forEach((v, i) => {if (v === null) {open = false; return} const px = x(toAxis(transform, data.distance_m[i])), py = y(v); open ? g.lineTo(px, py) : g.moveTo(px, py); open = true}); g.stroke(); g.restore()}
   function drawLabel(g, parts, left, top, right) {
@@ -702,7 +705,7 @@ DV.attachTools = view => {
     values.forEach(entry => {entry.gap = Math.abs(top + (vertical.maximum - entry.value) / vertical.span * (bottom - top) - (event.clientY - r.top))});
     const nearest = values.reduce((best, entry) => entry.gap < 16 && (!best || entry.gap < best.gap) ? entry : best, null);
     state.hoverCurve = nearest ? {profile: nearest.item.profile, key: nearest.item.key} : null; markNearestCell();
-    const offsetText = Math.abs(state.hoverDistance) < .05 ? '0.0' : `${state.hoverDistance > 0 ? '+' : '−'}${Math.abs(state.hoverDistance).toFixed(1)}`;
+    const offsetText = Math.abs(state.hoverDistance) < .005 ? '0.00' : `${state.hoverDistance > 0 ? '+' : '−'}${Math.abs(state.hoverDistance).toFixed(2)}`;
     const text = entry => `${entry === nearest ? '▸ ' : ''}${DV.COLORS[entry.item.profile.shape.slot][1]} ${channelLabel(entry.item.key)}: ${entry.value}`;
     readout.textContent = readout.title = `${offsetText} м от точки совмещения · яркость ${[...(nearest ? [nearest] : []), ...values.filter(entry => entry !== nearest)].map(text).join(' · ') || '—'}`; drawChart(); view.redraw();
   });
@@ -715,7 +718,7 @@ DV.attachTools = view => {
     if (minimum < full.minimum) {maximum += full.minimum - minimum; minimum = full.minimum}
     if (maximum > full.maximum) {minimum -= maximum - full.maximum; maximum = full.maximum}
     state.profileWindow = span >= full.maximum - full.minimum - 1e-6 ? null : {minimum, maximum};
-    clearHover(); markNearestCell(); readout.textContent=state.profileWindow?`масштаб: ${(state.profileWindow.maximum-state.profileWindow.minimum).toFixed(1)} м`:'вся длина'; drawChart();
+    clearHover(); markNearestCell(); readout.textContent=state.profileWindow?`масштаб: ${(state.profileWindow.maximum-state.profileWindow.minimum).toFixed(2)} м`:'вся длина'; drawChart();
   }, {passive:false});
   new ResizeObserver(() => drawChart()).observe(panel);
 
@@ -865,7 +868,7 @@ DV.setPolylineTrack = (pair, value, paths) => {
 DV.exportRow = (variant, link) => {
   const row = document.createElement('div'), select = document.createElement('select'), button = document.createElement('button'), note = document.createElement('span');
   row.className = 'export-row';
-  select.innerHTML = '<option value="utm">UTM (метры)</option><option value="wgs84">WGS84 (градусы)</option>';
+  select.innerHTML = '<option value="wgs84">WGS84 (градусы)</option><option value="utm">UTM (метры)</option>';
   select.title = 'Система координат GeoTIFF';
   button.type = 'button'; button.textContent = 'Экспортировать в GeoTIFF';
   button.title = 'Растр без сетки, с текущей цветовой коррекцией проекции; прозрачность там, где нет кадра';

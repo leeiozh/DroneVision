@@ -56,6 +56,12 @@ DV.session = (() => {
     navigator.sendBeacon('/api/session/save', new Blob([JSON.stringify(body)], {type: 'application/json'}));
   });
 
+  // Another video was opened: the results on screen belong to the previous one (the files stay in the project folder).
+  function clearResults() {
+    document.querySelector('#projectionResult').hidden = true; document.querySelector('#mosaicResult').hidden = true; DV.waves.hide();
+    results.projection = null; results.mosaic = null; results.waves = null; resultsDirty = true; touch();
+  }
+
   const rasterUrl = paths => (index, saved) => `/api/raster?path=${encodeURIComponent(paths[index])}${saved ? '&saved=1' : ''}&t=${Date.now()}`;
   function showResults(saved) {
     const notes = [];
@@ -92,6 +98,8 @@ DV.session = (() => {
     restoring = true;
     try {
       FIELDS.forEach(key => {if (fields[key] != null && form.elements[key]) form.elements[key].value = fields[key]});
+      // Sessions saved before the distance limit became optional carry its old default; it was not a choice.
+      if (fields.mosaic_max_distance_m === '3000') form.elements.mosaic_max_distance_m.value = '';
       if (form.elements.refine_alignment && fields.refine_alignment != null) form.elements.refine_alignment.checked = !!fields.refine_alignment;
       if (session.adjustments) DV.adjust.setAll(session.adjustments);
       Object.entries(session.overlays || {}).forEach(([key, value]) => DV.setOverlay(key, !!value));
@@ -162,5 +170,5 @@ DV.session = (() => {
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
 
-  return {start, touch, setResult, snapshot, apply, saveToFile, openFromFile};
+  return {start, touch, setResult, clearResults, snapshot, apply, saveToFile, openFromFile};
 })();

@@ -2,7 +2,8 @@
 // Loaded after tools.js and before app.js; app.js globals (viewer, video, form, api, seriesAt…) are used
 // only inside functions.
 //  * After a video is opened (and after every seek) the server says whether land should be in the frame.
-//    If so, the row «Берег» appears and offers to draw the coastline over the picture.
+//    If so, the collapsible panel «Берег и выравнивание по нему» says it in its heading and offers to draw
+//    the coastline over the picture.
 //  * The server sends the outlines as viewing directions (azimuth, depression); they are projected here
 //    with the pose of the current frame, so the overlay follows the playback and can be dragged:
 //    left/right changes «Поправка курса», up/down changes the gimbal pitch offset of this video.
@@ -84,7 +85,7 @@ DV.coast = (() => {
     q('#coastSave').disabled = !changed;
     q('#coastToggle').textContent = st.shown ? 'Скрыть береговую линию' : 'Наложить береговую линию';
     q('#coastToggle').disabled = !info.lines.length;
-    row.hidden = false;
+    row.hidden = false; q('#coastHint').textContent = info.in_view ? '· в кадре должен быть берег' : '';
     if (!info.data) {say(info.note, 'error'); return}
     if (info.in_view) say(`В кадре должен быть берег: ближайший в ${info.nearest_km} км, азимут ${info.azimuth_deg.toFixed(0)}°. ${st.shown ? 'Перетаскивайте линию по картинке: влево-вправо — курс, вверх-вниз — наклон камеры.' : 'Наложите береговую линию на картинку и проверьте, совпадает ли она.'}`, st.shown ? 'done' : 'working');
     else say(info.note || '', 'idle');
@@ -98,7 +99,7 @@ DV.coast = (() => {
       st.video = viewer.video_path; st.info = null; st.shown = false; st.offered = false; st.sticky = 0;
       const saved = viewer.pose_offsets || {};
       st.saved = {pitch: Number(saved.pitch_offset_deg) || 0, roll: Number(saved.roll_offset_deg) || 0};
-      st.pitch = st.saved.pitch; st.roll = st.saved.roll; q('#coastRow').hidden = true;
+      st.pitch = st.saved.pitch; st.roll = st.saved.roll; q('#coastRow').hidden = true; q('#coastHint').textContent = '';
     }
     let info;
     try {info = await api('/api/coast-view', {method: 'POST', body: JSON.stringify(params())})} catch (error) {q('#coastRow').hidden = false; say(error.message, 'error'); return}
@@ -107,7 +108,7 @@ DV.coast = (() => {
     if (!info.in_view && !info.maybe_in_view && !force && info.data) {
       // No land around: the row stays hidden unless something was already being adjusted.
       q('#coastRow').hidden = !st.shown && Math.abs(st.pitch) < 1e-4 && Math.abs(st.roll) < 1e-4;
-      st.lastDraw = ''; if (!q('#coastRow').hidden) describe();
+      st.lastDraw = ''; q('#coastHint').textContent = ''; if (!q('#coastRow').hidden) describe();
       return;
     }
     describe(); st.lastDraw = '';

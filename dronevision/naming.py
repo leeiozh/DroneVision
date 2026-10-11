@@ -1,9 +1,10 @@
 """Names of the saved results, the same for every tool:
 
-    <flight start, UTC>_<video name>_<first time>s_<last time>s_<type>[_<n>].<ext>
+    <flight start>_<video name>_<video start>_<first time>s_<last time>s_<type>[_<n>].<ext>
 
-* flight start — the first record of the matched FlightRecord, ``YYYYMMDDTHHMMSSZ``;
-* first / last time — seconds from the start of the video: the first and the last frame, or the start of the
+* flight start — the first record of the matched FlightRecord (takeoff), UTC, ``YYYYMMDDTHHMMSS``;
+* video start — the clock of the first frame (SRT, else MP4 creation_time), UTC, ``YYYYMMDDTHHMMSS``;
+* first / last time — seconds from the start of the video, to tenths (``0006.6s``): the first and the last frame, or the start of the
   first interval and the end of the last one (equal for a single frame);
 * type — ``projection``, ``compare1`` / ``compare2`` (two frames or two averaged intervals on one canvas),
   ``mosaic``, ``average``, ``enhanced``, ``currents``, ``motion``; transects add ``lines`` / ``contours`` and the
@@ -25,9 +26,19 @@ def flight_start_utc(context) -> datetime:
     return datetime.fromtimestamp(start, timezone.utc)
 
 
+def video_start_utc(context) -> datetime:
+    """First frame of the video in UTC; ``context.start_epoch`` is the camera's local clock written as an epoch."""
+    return datetime.fromtimestamp(context.start_epoch - context.utc_offset_hours * 3600, timezone.utc)
+
+
+def video_prefix(context) -> str:
+    """``<flight start>_<video name>_<video start>`` (both UTC): the beginning of every saved file name."""
+    return (f"{flight_start_utc(context):%Y%m%dT%H%M%S}_{Path(context.video).stem}"
+            f"_{video_start_utc(context):%Y%m%dT%H%M%S}")
+
+
 def base_name(context, first_s: float, last_s: float) -> str:
-    return (f"{flight_start_utc(context):%Y%m%dT%H%M%SZ}_{Path(context.video).stem}"
-            f"_{float(first_s):08.3f}s_{float(last_s):08.3f}s")
+    return f"{video_prefix(context)}_{float(first_s):06.1f}s_{float(last_s):06.1f}s"
 
 
 def output_stem(folder: Path, context, first_s: float, last_s: float, kind: str,
@@ -43,7 +54,8 @@ def output_stem(folder: Path, context, first_s: float, last_s: float, kind: str,
 
 def metadata(context, yaw_offset_deg: float | None = None) -> dict:
     """What used to be in the file names, plus the log synchronisation, for sidecars and result files."""
-    result = {"flight_start_utc": flight_start_utc(context).isoformat(timespec="seconds"),
+    result = {"video_start_utc": video_start_utc(context).isoformat(timespec="seconds"),
+              "flight_start_utc": flight_start_utc(context).isoformat(timespec="seconds"),
               "flight_log": Path(context.log_path).name,
               "log_sync": {"utc_offset_hours": context.utc_offset_hours,
                            "clock_offset_seconds": context.clock_offset_seconds}}

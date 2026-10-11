@@ -53,8 +53,10 @@ _POOL = ThreadPoolExecutor(_THREADS)
 LUMA = np.array([0.114, 0.587, 0.299], dtype=np.float32)       # BGR weights of Gray = 0.299R + 0.587G + 0.114B
 
 
-def _footprints(poses: dict, width: int, height: int, margin_rows: int, max_distance_m: float):
+def _footprints(poses: dict, width: int, height: int, margin_rows, max_distance_m: float):
     """Crop row, ENU corners and per-row blending weight of every frame.
+
+    ``margin_rows``: rows cut below the geometric horizon, one number or one per frame.
 
     The weight is the inverse sea-surface area of one image pixel along the centre column,
     ``f² h / d³`` (d = slant range): finer ground detail wins wherever frames overlap, whatever the
@@ -63,10 +65,11 @@ def _footprints(poses: dict, width: int, height: int, margin_rows: int, max_dist
     tens of times too much weight in its distant part.)
     """
     crop_rows, corners, row_weight = [], [], []
+    margins = np.broadcast_to(np.asarray(margin_rows, dtype=int), (len(poses["time_s"]),))
     for i in range(len(poses["time_s"])):
         basis = camera_basis(poses["yaw"][i], poses["pitch"][i], poses["roll"][i])
         focal, altitude = poses["focal_px"][i], poses["altitude"][i]
-        crop = max(horizon_crop_row(width, height, focal, basis, altitude, np.inf, margin_rows),
+        crop = max(horizon_crop_row(width, height, focal, basis, altitude, np.inf, int(margins[i])),
                    horizon_crop_row(width, height, focal, basis, altitude, max_distance_m))
         crop_rows.append(crop)
         corners.append(poses["offset"][i] + ground_corners(width, height, focal, basis, altitude, crop))
@@ -105,9 +108,21 @@ def _canvas(corners: np.ndarray, resolution: float, max_pixels: int, max_side: i
     return minimum, maximum, float(resolution), int(size[0]), int(size[1])
 
 
+def horizon_margin_rows(height: int, horizon_offset_percent=0.0, frames: int = 1):
+    """Rows cut below the geometric horizon: 2 % of the frame or the horizon line moved by hand, as in the
+    single projection.  One value for all frames, or one per frame when the list matches them."""
+    offsets = np.atleast_1d(np.asarray(horizon_offset_percent if horizon_offset_percent is not None else 0.0, dtype=float))
+    offsets = offsets if len(offsets) == frames else np.full(frames, float(offsets.max()))
+    return np.round(height * np.maximum(0.02, offsets / 100)).astype(int)
+
+
 def _edge_taper(length: int, ramp: int) -> np.ndarray:
-    """1 inside, falling smoothly to ~0 over ``ramp`` samples at both ends (seam-free blending)."""
-    position = np.minimum(np.arange(length) + 0.5, length - np.arange(length) - 0.5)
+    """1 inside, falling smoothly to exactly 0 at both ends over ``ramp`` samples (seam-free blending).
+
+    The outermost samples weigh nothing, so the warped weight is positive only strictly inside the frame and
+    no canvas pixel is built from the border beyond it (far from the camera one image row is many canvas rows).
+    """
+    position = np.minimum(np.arange(length), length - 1 - np.arange(length))
     t = np.clip(position / max(ramp, 1), 0, 1)
     return (t * t * (3 - 2 * t)).astype(np.float32)
 
@@ -146,7 +161,7 @@ def _accumulate(cv2, cropped, corners, row_weight, minimum, maximum, resolution,
                                             borderMode=cv2.BORDER_CONSTANT, borderValue=0)
         if not warped_weight.any():
             return
-        warped = cv2.warpPerspective(cropped, shift, size, flags=flags)
+        warped = cv2.warpPerspective(cropped, shift, size, flags=flags, borderMode=cv2.BORDER_REPLICATE)
         if keep is not None:
             warped_weight *= keep(top, bottom, x0, x1, warped)
         region = accumulator[top:bottom, x0:x1]
@@ -161,8 +176,19 @@ def _accumulate(cv2, cropped, corners, row_weight, minimum, maximum, resolution,
     return to_canvas
 
 
+def _mean(accumulator, weights):
+    """Weighted mean where anything was accumulated, 0 elsewhere.
+
+    The weights span many orders of magnitude (``f² h / d³`` times the edge taper: 1e-7 of the peak at 20 km),
+    so they must not be floored: a floor darkens the far part of every frame towards black.
+    """
+    total = weights if accumulator.ndim == weights.ndim else weights[..., None]
+    covered = total > 0
+    return np.where(covered, accumulator / np.where(covered, total, 1), 0)
+
+
 def _finish(accumulator, weights):
-    return np.where(weights[..., None] > 0, accumulator / np.maximum(weights[..., None], 1e-6), 0).clip(0, 255).round().astype(np.uint8)
+    return _mean(accumulator, weights).clip(0, 255).round().astype(np.uint8)
 
 
 def run(config: ProjectConfig, progress=lambda value, message: None) -> Path:
@@ -336,12 +362,13 @@ def _stable_temporal_sample(context, geod, start_s: float, end_s: float, yaw_off
 
 def mosaic_selected_frames(video_path: str, times_s, project_dir: str, takeoff_height_m: float = 0.0,
                            horizontal_fov_deg: float = 0.0, resolution_m_per_px: float = 1.0,
-                           yaw_offset_deg: float = 0.0, max_distance_m: float = 3000.0,
+                           yaw_offset_deg: float = 0.0, max_distance_m: float = 0.0,
                            adjustments: dict | None = None, bottom_crop_percent: float = 0.0,
                            output_kind: str = "mosaic", result_metadata: dict | None = None,
                            refine: bool = True, attitude_corrections=None, region_m: dict | None = None,
                            interpolation: str = "linear", robust: bool | None = None,
-                           name_span: tuple[float, float] | None = None, name_kind: str | None = None) -> dict:
+                           name_span: tuple[float, float] | None = None, name_kind: str | None = None,
+                           horizon_offset_percent=0.0) -> dict:
     """North-up mosaic of individual frames for checking how neighbouring frames overlap.
 
     ``name_span`` / ``name_kind`` override the times and the type in the file name (``naming.py``): by default
@@ -376,7 +403,7 @@ def mosaic_selected_frames(video_path: str, times_s, project_dir: str, takeoff_h
     poses = frame_poses(context, frame_indices / meta["fps"], geod, yaw_offset_deg, takeoff_height_m, horizontal_fov_deg)
     width, height = meta["width"], meta["height"]
     bottom_row = int(round(height * (1 - np.clip(bottom_crop_percent, 0, 95) / 100)))
-    margin = int(round(height * 0.02))
+    margin = horizon_margin_rows(height, horizon_offset_percent, len(frame_indices))
     robust = output_kind == "temporal_average" if robust is None else bool(robust)
     flags = {"linear": cv2.INTER_LINEAR, "cubic": cv2.INTER_CUBIC, "lanczos": cv2.INTER_LANCZOS4}[interpolation]
     # Decoded frames are kept for the later passes when they fit in ~1.6 GB (≤ 64 4K frames);
@@ -431,9 +458,8 @@ def mosaic_selected_frames(video_path: str, times_s, project_dir: str, takeoff_h
             # Second pass: per-pixel weighted mean and σ of Gray from the first pass, samples beyond
             # 2.5σ (+2 grey levels for quantisation) get zero weight.
             with np.errstate(invalid="ignore", divide="ignore"):
-                total = np.maximum(weights, 1e-6)
-                mean = (accumulator @ LUMA) / total
-                sigma = np.sqrt(np.maximum(luma_sq / total - mean ** 2, 0))
+                mean = _mean(accumulator @ LUMA, weights)
+                sigma = np.sqrt(np.maximum(_mean(luma_sq, weights) - mean ** 2, 0))
             limit = 2.5 * sigma + 2.0
             first_weight = weights.copy()
             del luma_sq
@@ -521,8 +547,9 @@ def mosaic_selected_frames(video_path: str, times_s, project_dir: str, takeoff_h
 def average_interval(video_path: str, start_s: float, end_s: float, project_dir: str,
                      takeoff_height_m: float = 0.0, horizontal_fov_deg: float = 0.0,
                      resolution_m_per_px: float = 1.0, yaw_offset_deg: float = 0.0,
-                     max_distance_m: float = 3000.0, adjustments: dict | None = None,
-                     bottom_crop_percent: float = 0.0, refine: bool = True) -> dict:
+                     max_distance_m: float = 0.0, adjustments: dict | None = None,
+                     bottom_crop_percent: float = 0.0, refine: bool = True,
+                     horizon_offset_percent: float = 0.0) -> dict:
     """Georeference and temporally average a stable sample from the selected interval."""
     _, geod = _dependencies()
     video = Path(video_path).expanduser().resolve()
@@ -533,5 +560,5 @@ def average_interval(video_path: str, start_s: float, end_s: float, project_dir:
         str(video), times, project_dir, takeoff_height_m, horizontal_fov_deg, resolution_m_per_px,
         yaw_offset_deg, max_distance_m, adjustments, bottom_crop_percent,
         output_kind="temporal_average", result_metadata={"temporal_average": report}, refine=refine,
-        name_span=(float(start_s), float(end_s)),
+        name_span=(float(start_s), float(end_s)), horizon_offset_percent=horizon_offset_percent,
     )

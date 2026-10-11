@@ -266,12 +266,12 @@ def write_geotiff(path: Path, rgba: np.ndarray, pixel_scale, tiepoint, geokeys: 
             stream.write(data)
 
 
-def export_geotiff(image_path: str, crs: str = "utm") -> dict:
+def export_geotiff(image_path: str, crs: str = "wgs84") -> dict:
     """Write ``<stem>_<crs>.tif`` next to the PNG: adjusted colours, no grid, alpha = coverage."""
     import cv2
 
     meta = load_georaster(image_path)
-    crs = "wgs84" if str(crs).lower() in ("wgs84", "4326", "epsg:4326", "latlon") else "utm"
+    crs = "utm" if str(crs).lower().startswith("utm") else "wgs84"
     bgra = load_data(meta)
     adjusted = apply_adjustments(bgra, meta.get("adjustments"))
     rgba = cv2.cvtColor(adjusted, cv2.COLOR_BGRA2RGBA)

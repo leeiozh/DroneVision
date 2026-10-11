@@ -81,6 +81,8 @@ def viewer_data(video_path: str, max_points: int = 2400) -> dict:
     return {
         "video": meta,
         "video_path": str(video),
+        # Clock of the first frame: the camera's local time written as an epoch; UTC = this - sync.hours.
+        "start_epoch": srt_start_epoch,
         "log_path": matched["log_path"],
         "srt_path": matched["srt_path"],
         "camera": {"profile": profile, "label": CAMERA_PROFILES[profile]["label"], "base_focal_mm": base_focal_mm},

@@ -5,7 +5,11 @@
 .coast-drag { height: 84%; z-index: 2; cursor: grab; touch-action: none; }
 .coast-drag:active { cursor: grabbing; }
 .coast-action { margin-top: 8px; padding-top: 8px; border-top: 0; }
-.coast-action > b { font-size: 13px; }
+.coast-panel { margin-top: 10px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; }
+.coast-panel > summary { padding: 9px 0; font-size: 13px; cursor: pointer; }
+.coast-panel > summary span { margin-left: 10px; color: var(--muted); font-size: 12px; }
+.coast-panel .coast-action { margin-top: 0; padding: 0 0 10px; }
+.coast-action #calibrateStatus { flex: 1 1 320px; min-width: 0; }
 .coast-action #coastStatus { flex: 1 1 320px; min-width: 0; }
 .coast-action #coastOffsets { font: 12px ui-monospace, monospace; white-space: nowrap; }
 

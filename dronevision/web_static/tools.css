@@ -209,8 +209,10 @@
 .profile-modes button:last-child { border-radius: 0 6px 6px 0; }
 .profile-y-scale { display: flex; }
 .profile-y-scale button { min-width: 30px; padding-inline: 8px; font-size: 16px; line-height: 1; }
+.profile-y-scale button { border-radius: 0; }
+.profile-y-scale button + button { border-left: 0; }
 .profile-y-scale button:first-child { border-radius: 6px 0 0 6px; }
-.profile-y-scale button:last-child { border-left: 0; border-radius: 0 6px 6px 0; }
+.profile-y-scale button:last-child { border-radius: 0 6px 6px 0; }
 .profile-channel-controls { flex: 0 0 auto; max-width: 100%; padding: 5px 8px; overflow-x: auto; }
 .profile-channel-controls:empty { display: none; }
 /* Switch matrix: rows = profiles, columns = channels; first row and first column switch a whole column / row. */

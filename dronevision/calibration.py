@@ -17,6 +17,7 @@ import numpy as np
 from .geometry import camera_basis, project_to_image
 from .pose import enu_offsets, frame_poses, load_context
 from .cvio import imwrite, open_video
+from .naming import video_prefix
 from .paths import tool
 from .projection import LOCAL_COASTLINE, _dependencies
 
@@ -303,7 +304,7 @@ def estimate_heading(video_path: str, time_s: float, takeoff_height_m: float = 0
                                      pose["focal_px"], problem.basis(params))
             for u, v in uv * problem.scale:
                 cv2.circle(overlay, (int(u), int(v)), 1, color, -1)
-        path = Path(output_dir).expanduser() / f"{context.video.stem}_{time_s:08.3f}s_heading.jpg"
+        path = Path(output_dir).expanduser() / f"{video_prefix(context)}_{time_s:06.1f}s_heading.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
         imwrite(path, overlay)
         result["overlay"] = str(path)

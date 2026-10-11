@@ -52,10 +52,20 @@ class Handler(SimpleHTTPRequestHandler):
             else:  # suffix range: last N bytes
                 start = max(size - int(right or 0), 0)
             status = 206
+        if start >= size or end < start:
+            self.send_response(416)
+            self.send_header("Content-Range", f"bytes */{size}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         length = end - start + 1
+        stat = path.stat()
         self.send_response(status)
         self.send_header("Content-Type", "video/mp4")
         self.send_header("Accept-Ranges", "bytes")
+        # Validators: the browser re-requests ranges after a long pause and checks it is still the same file.
+        self.send_header("ETag", f'"{stat.st_size:x}-{stat.st_mtime_ns:x}"')
+        self.send_header("Last-Modified", self.date_time_string(stat.st_mtime))
         self.send_header("Content-Length", str(length))
         if status == 206:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
@@ -64,11 +74,14 @@ class Handler(SimpleHTTPRequestHandler):
             stream.seek(start)
             remaining = length
             while remaining:
-                chunk = stream.read(min(1024 * 1024, remaining))
+                chunk = stream.read(min(256 * 1024, remaining))
                 if not chunk: break
                 try:
                     self.wfile.write(chunk)
-                except (BrokenPipeError, ConnectionResetError):
+                except OSError:
+                    # The player dropped the connection (seek, pause, quality switch).  On Windows this is
+                    # ConnectionAbortedError or a timeout, not BrokenPipeError as on Linux.
+                    self.close_connection = True
                     break
                 remaining -= len(chunk)
 
@@ -102,10 +115,15 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         try:
             return self._get()
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:   # the browser went away; there is nobody to answer
+            self.close_connection = True
             return None
         except Exception as exc:
-            return self._json({"error": str(exc)}, 400)
+            try:
+                return self._json({"error": str(exc)}, 400)
+            except OSError:
+                self.close_connection = True
+                return None
 
     def _get(self):
         parsed = urlparse(self.path)
@@ -162,7 +180,7 @@ class Handler(SimpleHTTPRequestHandler):
             # Generated on request next to the PNG, then streamed as a download.
             from .georaster import export_geotiff
             query = parse_qs(parsed.query)
-            result = export_geotiff(query.get("path", [""])[0], query.get("crs", ["utm"])[0])
+            result = export_geotiff(query.get("path", [""])[0], query.get("crs", ["wgs84"])[0])
             data = Path(result["path"]).read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "image/tiff")
@@ -237,7 +255,7 @@ class Handler(SimpleHTTPRequestHandler):
                     float(payload.get("yaw_offset_deg") or 0.0),
                     adjustments=payload.get("adjustments"),
                     bottom_crop_percent=float(payload.get("bottom_crop_percent") or 0.0),
-                    max_distance_m=float(payload.get("max_distance_m") or 10_000.0),
+                    max_distance_m=float(payload.get("max_distance_m") or 0.0),   # 0 = down to the horizon
                 )
                 result = {"variants": [variant], "time_s": variant["time_s"], "frame_index": variant["frame_index"]}
                 with LOCK:
@@ -252,7 +270,7 @@ class Handler(SimpleHTTPRequestHandler):
                     float(payload.get("resolution_m_per_px") or 0.0),   # 0 = auto, from the frame
                     float(payload.get("yaw_offset_deg") or 0.0),
                     refine=bool(payload.get("refine_alignment", False)),
-                    max_distance_m=float(payload.get("max_distance_m") or 10_000.0),
+                    max_distance_m=float(payload.get("max_distance_m") or 0.0),   # 0 = down to the horizon
                 )
                 with LOCK:
                     PROJECTION_STATE["variants"] = result["variants"]
@@ -265,10 +283,11 @@ class Handler(SimpleHTTPRequestHandler):
                     float(payload.get("horizontal_fov_deg") or 0.0),
                     float(payload.get("resolution_m_per_px") or 0.0),   # 0 = auto, from the frames
                     float(payload.get("yaw_offset_deg") or 0.0),
-                    float(payload.get("max_distance_m") or 3000.0),
+                    float(payload.get("max_distance_m") or 0.0),   # 0 = down to the horizon
                     adjustments=payload.get("adjustments"),
                     bottom_crop_percent=float(payload.get("bottom_crop_percent") or 0.0),
                     refine=bool(payload.get("refine_alignment", False)),
+                    horizon_offset_percent=payload.get("horizon_offsets_percent") or 0.0,   # one per frame
                 )
                 with LOCK:
                     MOSAIC_STATE["result"] = result
@@ -281,10 +300,11 @@ class Handler(SimpleHTTPRequestHandler):
                     float(payload.get("horizontal_fov_deg") or 0.0),
                     float(payload.get("resolution_m_per_px") or 0.0),   # 0 = auto, from the frames
                     float(payload.get("yaw_offset_deg") or 0.0),
-                    float(payload.get("max_distance_m") or 3000.0),
+                    float(payload.get("max_distance_m") or 0.0),   # 0 = down to the horizon
                     adjustments=payload.get("adjustments"),
                     bottom_crop_percent=float(payload.get("bottom_crop_percent") or 0.0),
                     refine=bool(payload.get("refine_alignment", False)),
+                    horizon_offset_percent=float(payload.get("horizon_offset_percent") or 0.0),
                 )
                 with LOCK:
                     MOSAIC_STATE["result"] = result
@@ -298,10 +318,11 @@ class Handler(SimpleHTTPRequestHandler):
                     float(payload.get("horizontal_fov_deg") or 0.0),
                     float(payload.get("resolution_m_per_px") or 0.0),   # 0 = auto, from the frames
                     float(payload.get("yaw_offset_deg") or 0.0),
-                    float(payload.get("max_distance_m") or 3000.0),
+                    float(payload.get("max_distance_m") or 0.0),   # 0 = down to the horizon
                     adjustments=payload.get("adjustments"),
                     bottom_crop_percent=float(payload.get("bottom_crop_percent") or 0.0),
                     refine=bool(payload.get("refine_alignment", False)),
+                    horizon_offset_percent=float(payload.get("horizon_offset_percent") or 0.0),
                 ))
             if self.path == "/api/enhance":
                 from .enhance import enhance_region
@@ -421,10 +442,17 @@ def _run(config):
             STATE.update(status="error", message="Обработка остановлена", error=str(exc))
 
 
+class Server(ThreadingHTTPServer):
+    # The page opens a burst of connections (video ranges, rasters, status polls).  Windows refuses
+    # connections beyond the listen backlog at once, Linux lets them wait; the default is 5.
+    request_queue_size = 64
+    daemon_threads = True
+
+
 def serve(host="127.0.0.1", port=8765, open_browser=False):
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}"
     try:
-        server = ThreadingHTTPServer((host, port), Handler)
+        server = Server((host, port), Handler)
     except OSError as exc:
         # Usually a second start: the first copy is still running in another window.
         print(f"Порт {port} занят ({exc}).\nЕсли DroneVision уже запущен, он открыт по адресу {url}")

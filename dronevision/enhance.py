@@ -116,7 +116,7 @@ def enhance_region(paths: list[str], region: dict, adjustments: dict | None = No
         result = mosaic_selected_frames(
             meta["video"], times, str(project_dir), float(meta.get("takeoff_height_m") or 0.0),
             float(meta.get("horizontal_fov_deg") or 0.0), resolution, float(meta.get("yaw_offset_deg") or 0.0),
-            float(meta.get("max_distance_m") or 10_000.0), adjustments if adjustments is not None else meta.get("adjustments"),
+            float(meta.get("max_distance_m") or 0.0), adjustments if adjustments is not None else meta.get("adjustments"),
             float(meta.get("bottom_crop_percent") or 0.0), output_kind="enhanced",
             result_metadata={"enhanced_from": meta["image"], "source_kind": meta.get("kind"),
                              "native_resolution_m": None if not native else round(min(native), 3)},

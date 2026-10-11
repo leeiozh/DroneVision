@@ -18,6 +18,7 @@ import numpy as np
 from .cvio import open_video
 from .geometry import camera_basis, finest_ground_resolution
 from .mosaic import (MAX_CANVAS_PIXELS, MAX_CANVAS_SIDE, _canvas, _dependencies, _footprints, _read_frame,
+                     horizon_margin_rows,
                      _stable_temporal_sample, mosaic_selected_frames)
 from .pose import frame_poses, load_context
 
@@ -62,9 +63,9 @@ def _align_intervals(cv2, context, geod, video, samples: list[dict], bottom_row:
 
 def compare_averaged_intervals(video_path: str, intervals, project_dir: str, takeoff_height_m: float = 0.0,
                                horizontal_fov_deg: float = 0.0, resolution_m_per_px: float = 0.0,
-                               yaw_offset_deg: float = 0.0, max_distance_m: float = 3000.0,
+                               yaw_offset_deg: float = 0.0, max_distance_m: float = 0.0,
                                adjustments: dict | None = None, bottom_crop_percent: float = 0.0,
-                               refine: bool = True) -> dict:
+                               refine: bool = True, horizon_offset_percent: float = 0.0) -> dict:
     """Average two intervals onto one identical ENU canvas.
 
     ``intervals`` = [[start_s, end_s], [start_s, end_s]].  Returns {"variants": [earlier, later],
@@ -99,7 +100,7 @@ def compare_averaged_intervals(video_path: str, intervals, project_dir: str, tak
     corners, native = [], []
     for sample in samples:
         poses = sample["poses"]
-        crop_rows, sample_corners, _ = _footprints(poses, width, height, int(round(height * 0.02)), max_distance_m)
+        crop_rows, sample_corners, _ = _footprints(poses, width, height, int(horizon_margin_rows(height, horizon_offset_percent)[0]), max_distance_m)
         corners.append(sample_corners)
         native += [finest_ground_resolution(
             width, height, poses["focal_px"][n], camera_basis(poses["yaw"][n], poses["pitch"][n], poses["roll"][n]),
@@ -122,7 +123,8 @@ def compare_averaged_intervals(video_path: str, intervals, project_dir: str, tak
             yaw_offset_deg, max_distance_m, adjustments, bottom_crop_percent, output_kind="temporal_average",
             result_metadata={"temporal_average": sample["report"]}, refine=False,
             attitude_corrections=sample["poses"].get("attitude_correction"), region_m=region,
-            name_span=(ordered[0][0], ordered[1][1]), name_kind=f"compare{len(variants) + 1}")
+            name_span=(ordered[0][0], ordered[1][1]), name_kind=f"compare{len(variants) + 1}",
+            horizon_offset_percent=horizon_offset_percent)
         result.update(time_s=round(float(np.mean(sample["indices"] / fps)), 3),
                       interval_s=sample["report"]["used_interval_s"], refinement=sample["refinement"],
                       resolution_auto=resolution_auto, native_resolution_m=min(native))

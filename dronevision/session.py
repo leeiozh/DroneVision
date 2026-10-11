@@ -107,6 +107,10 @@ def load_session(path: str | None = None) -> dict:
     if waves and not Path(str(waves.get("path") or "")).is_file():
         missing.append(waves.get("path") or "течения")
         results.pop("waves")
+    ice = results.get("ice")
+    if ice and not Path(str(ice.get("path") or "")).is_file():
+        missing.append(ice.get("path") or "дрейф льдин")
+        results.pop("ice")
     session["results"] = results
     video = _video(session)
     return {"session": session, "path": str(source), "saved_at": session.get("saved_at"),

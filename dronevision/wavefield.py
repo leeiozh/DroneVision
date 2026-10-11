@@ -17,7 +17,13 @@ Everything is automatic:
   pitch and roll from the horizon line, heading drift from land or clouds on the horizon.  A drift of
   0.7° in a minute (DJI_0531) is 6 m at 500 m — a false current of 0.1 m/s if left to the log;
 * the ground scale is checked by the same fit (``scale``): a wrong height or pitch stretches all
-  wavenumbers and shows up as a scale ≠ 1.
+  wavenumbers and shows up as a scale ≠ 1;
+* a camera heading that drifts without being logged turns the whole picture about the drone and looks like
+  a current across the line of sight, proportional to the range (DJI_0879, 2025-09-05: 0.16°/s gave 1.2 m/s
+  at 450 m).  With three or more cells this rotation is separated from a uniform current by the pattern of
+  the cell vectors (``_rigid_field``) and removed when the heading was not tracked along the horizon;
+* a moving drone turns every error of the camera heading and of the ground scale into a false current
+  (speed × error): the result is then marked unreliable and the sensitivity is spelled out.
 
 The spectra are spectra of image brightness, not of elevation: peak wavelength, period and directions are
 reliable, energy levels are relative.  Checked on DJI_0531 against a manual analysis and a synthetic cube.
@@ -32,7 +38,7 @@ import numpy as np
 
 from . import horizon
 from .cvio import imwrite, open_video
-from .geometry import camera_basis, ground_points, pixel_rays
+from .geometry import camera_basis, ground_corners, ground_points, horizon_crop_row, pixel_rays
 from .naming import metadata as naming_metadata, output_stem
 from .pose import frame_poses, load_context
 
@@ -89,50 +95,98 @@ def _shell_points(power, k_east, k_north, omega, k_min: float, k_max: float, top
     return omega[it], kx[iy, ix], ky[iy, ix], values[iy, ix, it].astype(np.float64)
 
 
+SHELL_WIDTH = 0.15      # rad/s: final width of the shell in the fit, about the frequency resolution of half a record
+
+
 def fit_current(points, scale: float = 1.0) -> dict | None:
-    """Weighted least squares for U on the dispersion shell; ``scale`` multiplies all wavenumbers."""
+    """Current U that puts most spectral energy on the dispersion shell; ``scale`` multiplies all wavenumbers.
+
+    Weighted least squares with Gaussian weights exp(−r²/2σ²) on the frequency residual r, σ shrinking from
+    0.8 to ``SHELL_WIDTH`` rad/s: points off the shell (noise, harmonics, another cell's leakage) lose their
+    weight smoothly instead of pulling the plane, so a weak shell among noise is still found.
+    """
     if points is None:
         return None
     w, kx, ky, p = points
     kx, ky = kx * scale, ky * scale
     k = np.hypot(kx, ky)
+    design, target = np.column_stack([kx, ky]), w - np.sqrt(G * k)
     current = np.zeros(2)
-    keep = np.ones(len(w), bool)
-    for _ in range(8):
-        residual = w - np.sqrt(G * k) - kx * current[0] - ky * current[1]
-        sigma = np.sqrt((p[keep] * residual[keep] ** 2).sum() / p[keep].sum())
-        keep = np.abs(residual) < max(2.0 * sigma, 0.25)
-        if keep.sum() < 100:
+    for sigma in np.geomspace(0.8, SHELL_WIDTH, 12):
+        residual = target - design @ current
+        root = np.sqrt(p * np.exp(-0.5 * (residual / sigma) ** 2))
+        if (root > 0).sum() < 100:
             return None
-        root = np.sqrt(p[keep])
-        current = np.linalg.lstsq(np.column_stack([kx, ky])[keep] * root[:, None],
-                                  (w - np.sqrt(G * k))[keep] * root, rcond=None)[0]
-    residual = w - np.sqrt(G * k) - kx * current[0] - ky * current[1]
+        current = np.linalg.lstsq(design * root[:, None], target * root, rcond=None)[0]
+    residual = target - design @ current
+    on_shell = p * np.exp(-0.5 * (residual / SHELL_WIDTH) ** 2)
+    keep = np.abs(residual) < 2 * SHELL_WIDTH
+    if keep.sum() < 100:
+        return None
     weights = p[keep]
     # Spread of the wave directions: with one narrow swell only the along-wave component is measured.
     angle = np.arctan2(kx[keep], ky[keep])
     resultant = np.hypot((weights * np.sin(angle)).sum(), (weights * np.cos(angle)).sum()) / weights.sum()
     return {"u": float(current[0]), "v": float(current[1]), "points": int(keep.sum()),
             "rms": float(np.sqrt((weights * residual[keep] ** 2).sum() / weights.sum())),
-            "share": float(weights.sum() / p.sum()), "direction_resultant": float(resultant), "keep": keep}
+            # Share of the selected energy lying on the shell: ~0.75 for clean waves, ~0.15 for noise alone.
+            "share": float(on_shell.sum() / p.sum()), "direction_resultant": float(resultant), "keep": keep}
 
 
-def best_scale(points, steps=np.arange(0.80, 1.201, 0.02)) -> tuple[float, float] | None:
-    """Wavenumber scale that makes the shell fit best (1 = the ground scale of the rectification is right)."""
+def best_scale(points, steps=np.geomspace(0.6, 1.6, 34)) -> tuple[float, float] | None:
+    """Wavenumber scale that puts most energy on the shell (1 = the ground scale of the rectification is right)."""
     rows = []
     for s in steps:
         fit = fit_current(points, float(s))
         if fit:
-            rows.append((float(s), fit["rms"]))
+            rows.append((float(s), fit["share"]))
     if len(rows) < 5:
         return None
     rows = np.array(rows)
-    j = int(rows[:, 1].argmin())
+    j = int(rows[:, 1].argmax())
     if 0 < j < len(rows) - 1:
         a, b, c = rows[j - 1, 1], rows[j, 1], rows[j + 1, 1]
         offset = 0.5 * (a - c) / (a - 2 * b + c) if a - 2 * b + c else 0.0
-        return float(rows[j, 0] + offset * (rows[1, 0] - rows[0, 0])), float(b)
+        return float(rows[j, 0] * (rows[j + 1, 0] / rows[j, 0]) ** offset), float(b)
     return float(rows[j, 0]), float(rows[j, 1])
+
+
+def _rigid_field(cells: list[dict], camera: np.ndarray) -> dict | None:
+    """Uniform current plus a rotation about the camera, fitted to the cell vectors: v = U + Ω ẑ × (r − camera).
+
+    A heading drift of the camera moves every ground point across the line of sight by Ω·range, so cells to
+    the left and right of the axis get opposite along-sight components — a pattern a uniform current cannot
+    make.  Needs three or more cells off one line; ``sigma_m_s`` says how well U is separated from Ω.
+    """
+    rows = [c for c in cells if c.get("u_east_m_s") is not None and c["quality"] != "failed"]
+    solution = None
+    while len(rows) >= 3:
+        design, target = [], []
+        for c in rows:
+            x, y = c["east_m"] - camera[0], c["north_m"] - camera[1]
+            design += [[1, 0, -y], [0, 1, x]]
+            target += [c["u_east_m_s"], c["v_north_m_s"]]
+        design, target = np.array(design, float), np.array(target, float)
+        normal = design.T @ design
+        if np.linalg.cond(normal) > 1e12:
+            return None
+        solution = np.linalg.solve(normal, design.T @ target)
+        misfit = np.hypot(*(design @ solution - target).reshape(-1, 2).T)
+        worst = int(misfit.argmax())
+        # One cell far off the common pattern (a failed fit that looked plausible) is dropped once.
+        if len(rows) >= 5 and misfit[worst] > max(0.2, 3 * float(np.median(misfit))):
+            rows = rows[:worst] + rows[worst + 1:]
+            continue
+        break
+    if solution is None:
+        return None
+    degrees = max(2 * len(rows) - 3, 1)
+    variance = max(float((misfit ** 2).sum()) / degrees, 0.03 ** 2)   # a cell vector is never better than 3 cm/s
+    covariance = np.linalg.inv(normal) * variance
+    return {"u": float(solution[0]), "v": float(solution[1]), "omega_deg_s": float(np.rad2deg(solution[2])),
+            "omega_rad_s": float(solution[2]), "omega_sigma_deg_s": float(np.rad2deg(np.sqrt(covariance[2, 2]))),
+            "sigma_m_s": float(np.sqrt(covariance[0, 0] + covariance[1, 1])),
+            "residual_m_s": float(np.sqrt((misfit ** 2).mean())), "cells": len(rows)}
 
 
 # --- geometry of the cells ------------------------------------------------------------------------------
@@ -212,6 +266,40 @@ def _to_cell(pose_basis, focal: float, altitude: float, camera_offset: np.ndarra
     camera = np.array([[focal, 0, width / 2], [0, focal, height / 2], [0, 0, 1]], dtype=np.float64)
     forward, right, down = pose_basis
     return camera @ np.stack([right, down, forward]) @ ground
+
+
+def _footprint(poses: dict, i: int, width: int, height: int, reach_m: float) -> np.ndarray:
+    """ENU outline of the water seen in frame ``i`` closer than ``reach_m``: far-left, far-right, near-right, near-left."""
+    basis = camera_basis(poses["yaw"][i], poses["pitch"][i], poses["roll"][i])
+    focal, altitude = float(poses["focal_px"][i]), float(poses["altitude"][i])
+    crop = horizon_crop_row(width, height, focal, basis, altitude, reach_m)
+    return poses["offset"][i] + ground_corners(width, height, focal, basis, altitude, crop)
+
+
+def _frame_view(cv2, frame, poses: dict, centres, cell_m: float, qualities) -> np.ndarray:
+    """The first frame of the interval with the outlines and numbers of the cells, 1280 px wide."""
+    height, width = frame.shape[:2]
+    basis = camera_basis(poses["yaw"][0], poses["pitch"][0], poses["roll"][0])
+    focal, altitude = float(poses["focal_px"][0]), float(poses["altitude"][0])
+    scale = 1280 / width
+    view = cv2.resize(frame, (1280, int(round(height * scale))), interpolation=cv2.INTER_AREA)
+    colours = {"good": (138, 208, 47), "weak": (46, 176, 255), "failed": (69, 91, 255)}
+    for number, (centre, quality) in enumerate(zip(centres, qualities), 1):
+        t = np.linspace(-0.5, 0.5, 9) * cell_m
+        ring = np.concatenate([np.column_stack([t, np.full(9, -0.5 * cell_m)]), np.column_stack([np.full(9, 0.5 * cell_m), t]),
+                               np.column_stack([t[::-1], np.full(9, 0.5 * cell_m)]), np.column_stack([np.full(9, -0.5 * cell_m), t[::-1]])])
+        vectors = np.column_stack([centre + ring - poses["offset"][0], np.full(len(ring), -altitude)])
+        depth = vectors @ basis[0]
+        if np.any(depth <= 0):
+            continue
+        pixels = np.column_stack([width / 2 + focal * (vectors @ basis[1]) / depth, height / 2 + focal * (vectors @ basis[2]) / depth]) * scale
+        outline = np.round(pixels).astype(np.int32).reshape(-1, 1, 2)
+        cv2.polylines(view, [outline], True, (0, 0, 0), 4, cv2.LINE_AA)
+        cv2.polylines(view, [outline], True, colours[quality], 2, cv2.LINE_AA)
+        x, y = pixels.mean(axis=0)
+        for colour, thickness in (((0, 0, 0), 4), ((255, 255, 255), 2)):
+            cv2.putText(view, str(number), (int(x) - 8, int(y) + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, thickness, cv2.LINE_AA)
+    return view
 
 
 # --- wave statistics ------------------------------------------------------------------------------------
@@ -342,6 +430,13 @@ def analyse(video_path: str, start_s: float | None, end_s: float | None, project
                                        float(poses["log_pitch"][0]))
         attitude = {"horizon": tracker.first is not None, "yaw_from_image": False,
                     "log_pitch_deg": round(float(poses["log_pitch"][0]), 2)}
+        if tracker.first is not None and abs(tracker.first["pitch_deg"] - float(poses["log_pitch"][0])) > 1.5:
+            # Haze hides the sea horizon; the strongest straight edge is then a fog bank or a slick on the water.
+            notes.append(f"найденная линия горизонта даёт наклон {tracker.first['pitch_deg']:.1f}° при {poses['log_pitch'][0]:.1f}° "
+                         "в логе — похоже на дымку или полосу на воде; использованы углы из лога")
+            attitude["rejected_horizon_pitch_deg"] = round(tracker.first["pitch_deg"], 2)
+            tracker.first = None
+            attitude["horizon"] = False
         if tracker.first is not None:
             delta = tracker.first["pitch_deg"] - float(poses["pitch"][0])
             poses = dict(poses, pitch=poses["pitch"] + delta,
@@ -349,18 +444,24 @@ def analyse(video_path: str, start_s: float | None, end_s: float | None, project
             attitude.update(horizon_pitch_deg=round(tracker.first["pitch_deg"], 3),
                             horizon_roll_deg=round(tracker.first["roll_deg"], 3),
                             pitch_minus_log_deg=round(tracker.first["pitch_deg"] - float(poses["log_pitch"][0]), 2))
-        else:
+        elif "rejected_horizon_pitch_deg" not in attitude:
             notes.append("линия горизонта не найдена: углы камеры взяты из лога, дрейф подвеса не исключён")
         resolution, centres, layout = _layout(poses, width, height)
         cell_m = layout["cell_m"]
         cubes = [np.zeros((len(indices), CELL_PX, CELL_PX), np.uint8) for _ in centres]
-        # Overview map under the arrows: north up, all cells with a margin.
-        lower = np.min(centres, axis=0) - 0.75 * cell_m
-        upper = np.max(centres, axis=0) + 0.75 * cell_m
+        # Overview map under the arrows: north up — the cells, the drone and the part of the frame around them,
+        # so that it is seen where on the water the cells lie.
+        middle = len(indices) // 2
+        reach = 1.5 * (max(float(np.linalg.norm(c - poses["offset"][middle])) for c in centres) + cell_m)
+        footprint = _footprint(poses, middle, width, height, reach)
+        around = np.vstack([np.asarray(centres) - cell_m, np.asarray(centres) + cell_m, footprint, poses["offset"][[middle]]])
+        edge = 0.05 * float(np.max(around.max(axis=0) - around.min(axis=0)))      # room for the drone mark and labels
+        lower, upper = around.min(axis=0) - edge, around.max(axis=0) + edge
         map_resolution = float(max(resolution, np.max(upper - lower) / 1400))
         map_w, map_h = (np.ceil((upper - lower) / map_resolution)).astype(int)
         map_sum = np.zeros((map_h, map_w, 3), np.float32)
-        map_count = 0
+        map_count = np.zeros((map_h, map_w), np.float32)
+        first_frame = frame.copy()
         measured = np.full((len(indices), 3), np.nan)       # pitch, roll, yaw shift from the image
         log_yaw = np.rad2deg(np.unwrap(np.deg2rad(poses["yaw"])))
         yaw_first, shift_last, n_last = float(log_yaw[0]), 0.0, 0
@@ -402,9 +503,19 @@ def analyse(video_path: str, start_s: float | None, end_s: float | None, project
                 ground = np.array([[map_resolution, 0, relative[0]], [0, -map_resolution, relative[1] + map_h * map_resolution],
                                    [0, 0, -poses["altitude"][n]]], dtype=np.float64)
                 camera = np.array([[poses["focal_px"][n], 0, width / 2], [0, poses["focal_px"][n], height / 2], [0, 0, 1]])
-                map_sum += cv2.warpPerspective(frame, camera @ np.stack([basis[1], basis[2], basis[0]]) @ ground,
-                                               (int(map_w), int(map_h)), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP)
-                map_count += 1
+                warped = cv2.warpPerspective(frame, camera @ np.stack([basis[1], basis[2], basis[0]]) @ ground,
+                                             (int(map_w), int(map_h)), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP)
+                # Only the water this frame really shows: beyond the horizon the homography folds the sky back.
+                try:
+                    outline = _footprint(poses, n, width, height, reach)
+                    inside = np.zeros((map_h, map_w), np.uint8)
+                    cv2.fillConvexPoly(inside, np.round(np.column_stack([
+                        (outline[:, 0] - lower[0]) / map_resolution,
+                        (lower[1] + map_h * map_resolution - outline[:, 1]) / map_resolution])).astype(np.int32), 1)
+                    cv2.accumulateProduct(warped.astype(np.float32), cv2.merge([inside.astype(np.float32)] * 3), map_sum)
+                    map_count += inside
+                except ValueError:
+                    pass
             if n % 40 == 0:
                 progress(0.05 + 0.55 * n / len(indices), f"Проецирую кадры: {n} из {len(indices)}")
     finally:
@@ -416,8 +527,7 @@ def analyse(video_path: str, start_s: float | None, end_s: float | None, project
         attitude.update(yaw_from_image=True, yaw_drift_deg=round(float(difference[-1] - difference[0]), 3),
                         yaw_drift_span_deg=round(float(np.ptp(difference)), 3))
     elif tracker.first is not None:
-        notes.append("на горизонте нет неподвижных деталей (суша, облака): курс взят из лога, "
-                     "его дрейф даёт ложное течение до ~0.1 м/с на 500 м")
+        attitude["yaw_untracked"] = True     # no fixed detail on the horizon; see the rotation check below
     if tracker.first is not None and np.isfinite(measured[:, 0]).any():
         attitude["pitch_span_deg"] = round(float(np.nanmax(measured[:, 0]) - np.nanmin(measured[:, 0])), 3)
 
@@ -426,7 +536,8 @@ def analyse(video_path: str, start_s: float | None, end_s: float | None, project
     to_lonlat = _transformer(aeqd_crs(lat0, lon0), "EPSG:4326")
     half = len(indices) // 2
     k_min = 2 * np.pi / (cell_m / 6)
-    k_max = np.pi / resolution * 0.7
+    # Waves whose frequency (with a current of ~1 m/s) reaches the Nyquist frequency of the sampling alias.
+    k_max = min(np.pi / resolution * 0.7, (0.8 * np.pi / dt) ** 2 / G)
     camera_position = poses["offset"].mean(axis=0)
     cells, pooled_good, pooled_weak = [], None, None
     for number, (cube, centre) in enumerate(zip(cubes, centres)):
@@ -445,17 +556,19 @@ def analyse(video_path: str, start_s: float | None, end_s: float | None, project
             halves = [f for f in fits[1:] if f is not None]
             difference = float(np.hypot(halves[0]["u"] - halves[1]["u"], halves[0]["v"] - halves[1]["v"])) if len(halves) == 2 else None
             scale = best_scale(_shell_points(both, k_east, k_north, omega, k_min, k_max))
-            quality = "good" if (fit["points"] >= 1500 and fit["rms"] < 0.2 and difference is not None and difference < 0.12
-                                 and fit["direction_resultant"] < 0.97) else "weak"
+            # Energy on the shell: 0.6–0.8 for clean waves, 0.15–0.2 when the cube is noise.
+            quality = ("failed" if fit["share"] < 0.25 else
+                       "good" if (fit["share"] >= 0.5 and difference is not None and difference < 0.12
+                                  and fit["direction_resultant"] < 0.97) else "weak")
             cell.update(u_east_m_s=round(u, 3), v_north_m_s=round(v, 3), speed_m_s=round(float(np.hypot(u, v)), 3),
                         direction_to_deg=round(float(np.rad2deg(np.arctan2(u, v)) % 360), 1),
                         halves_difference_m_s=None if difference is None else round(difference, 3),
-                        fit_rms_rad_s=round(fit["rms"], 3), points=fit["points"],
+                        fit_rms_rad_s=round(fit["rms"], 3), points=fit["points"], shell_share=round(fit["share"], 2),
                         scale=None if scale is None else round(scale[0], 3), quality=quality,
                         one_direction=bool(fit["direction_resultant"] >= 0.97))
             if quality == "good":
                 pooled_good = both.copy() if pooled_good is None else pooled_good + both
-            else:
+            elif quality == "weak":
                 pooled_weak = both.copy() if pooled_weak is None else pooled_weak + both
         cells.append(cell)
         del first, second, both
@@ -467,23 +580,89 @@ def analyse(video_path: str, start_s: float | None, end_s: float | None, project
         raise ValueError("Дисперсионная поверхность волн не найдена ни на одном участке: волнение слишком слабое, "
                          "блики или кадр слишком далёк от воды")
     u_all, v_all = np.array([c["u_east_m_s"] for c in good]), np.array([c["v_north_m_s"] for c in good])
-    mean = np.array([np.median(u_all), np.median(v_all)])
+    measured_mean = np.array([np.median(u_all), np.median(v_all)])     # as seen in the (possibly turning) picture
     scatter = float(np.hypot(np.std(u_all), np.std(v_all))) if len(good) > 1 else None
+    differences = [c["halves_difference_m_s"] for c in good if c.get("halves_difference_m_s") is not None]
+    uncertainty = max(scatter or 0.0, float(np.median(differences)) / 2 if differences else 0.0) / np.sqrt(len(good))
     scales = [c["scale"] for c in good if c.get("scale")]
+
+    duration = float(times[-1] - times[0])
+    drone_velocity = (poses["offset"][-1] - poses["offset"][0]) / max(duration, 1e-6)
+    drone_speed = float(np.hypot(*drone_velocity))
+
+    # Camera heading drift: a rotation of the cell vectors about the drone.
+    mean, rotation = measured_mean, None
+    rigid = _rigid_field(cells, camera_position)
+    reasons = []
+    if rigid is not None:
+        separable = rigid["sigma_m_s"] <= 0.3
+        # In flight the cell pattern also carries the heading and scale errors times the drone speed: no correction.
+        apply = separable and not attitude["yaw_from_image"] and drone_speed <= 0.5
+        rotation = {"omega_deg_s": round(rigid["omega_deg_s"], 4), "omega_sigma_deg_s": round(rigid["omega_sigma_deg_s"], 4),
+                    "sigma_m_s": round(rigid["sigma_m_s"], 3), "residual_m_s": round(rigid["residual_m_s"], 3),
+                    "cells": rigid["cells"], "applied": bool(apply),
+                    "false_current_m_s": round(float(abs(rigid["omega_rad_s"]) * np.median([c["range_m"] for c in good])), 3)}
+        if apply:
+            mean = np.array([rigid["u"], rigid["v"]])
+            uncertainty = max(rigid["sigma_m_s"], uncertainty)
+            if abs(rigid["omega_deg_s"]) > max(0.01, 2 * rigid["omega_sigma_deg_s"]):
+                notes.append(f"картинка поворачивается вокруг дрона на {abs(rigid['omega_deg_s']):.3f}°/с (увод курса камеры, которого нет "
+                             f"в логе): это {rotation['false_current_m_s']:.2f} м/с ложного течения поперёк луча зрения — исключено "
+                             "по различию векторов на участках слева и справа")
+        elif not attitude["yaw_from_image"] and drone_speed <= 0.5:
+            reasons.append("курс камеры не проверен: участки лежат слишком кучно, чтобы отделить увод курса от течения")
+    elif not attitude["yaw_from_image"]:
+        reasons.append("курс камеры не проверен (нужно 3+ участка или детали на горизонте): увод курса на 0.1°/с — "
+                       "это ложные 0.17 м/с на каждые 100 м дальности")
+    for c in cells:
+        if c.get("u_east_m_s") is None:
+            continue
+        turn = rigid["omega_rad_s"] if rotation and rotation["applied"] else 0.0
+        u = c["u_east_m_s"] + turn * (c["north_m"] - camera_position[1])
+        v = c["v_north_m_s"] - turn * (c["east_m"] - camera_position[0])
+        c.update(measured_u_east_m_s=c["u_east_m_s"], measured_v_north_m_s=c["v_north_m_s"], u_east_m_s=round(float(u), 3),
+                 v_north_m_s=round(float(v), 3), speed_m_s=round(float(np.hypot(u, v)), 3),
+                 direction_to_deg=round(float(np.rad2deg(np.arctan2(u, v)) % 360), 1))
+
+    # A moving drone: every error of heading and scale becomes a false current of (drone speed × error).
+    scale_value = float(np.median(scales)) if scales else None
+    if drone_speed > 0.5:
+        along = drone_velocity / drone_speed
+        across = float(mean[0] * along[1] - mean[1] * along[0])
+        reasons.append(f"дрон летит со скоростью {drone_speed:.1f} м/с: ошибка курса камеры в 1° даёт {drone_speed * 0.0175:.2f} м/с "
+                       f"ложного течения поперёк пути, ошибка масштаба в 1 % — {drone_speed * 0.01:.2f} м/с вдоль пути. "
+                       f"Найденная поперечная составляющая {abs(across):.2f} м/с равна ошибке курса "
+                       f"{np.rad2deg(np.arctan2(abs(across), drone_speed)):.0f}° — для течений нужно висение")
+    elif moved > 15:
+        notes.append(f"дрон сместился на {moved:.0f} м за интервал: для течений лучше висение")
+    if scale_value is not None and abs(scale_value - 1) > 0.1:
+        reasons.append(f"масштаб по дисперсии волн {scale_value:.2f} вместо 1: высота над водой или наклон камеры неверны на "
+                       "эту долю — выровняйте кадр по горизонту или берегу и проверьте «Взлёт над водой»")
+    elif scale_value is not None and abs(scale_value - 1) > 0.06:
+        notes.append(f"масштаб по дисперсии волн {scale_value:.2f} ≠ 1: проверьте «Взлёт над водой» и наклон камеры")
+    has_good = any(c["quality"] == "good" for c in cells)
+    if not has_good:
+        reasons.append("ни на одном участке волны не дали уверенной дисперсионной поверхности "
+                       "(мало энергии на ней или половины записи расходятся)")
+    if duration < 40:
+        notes.append(f"запись {duration:.0f} с: для течений лучше 40–90 с")
+    gross = drone_speed > 0.5 or (scale_value is not None and abs(scale_value - 1) > 0.1)
+    reliability = "unreliable" if gross else "weak" if reasons else "good"
     summary = {"u_east_m_s": round(float(mean[0]), 3), "v_north_m_s": round(float(mean[1]), 3),
                "speed_m_s": round(float(np.hypot(*mean)), 3),
                "direction_to_deg": round(float(np.rad2deg(np.arctan2(mean[0], mean[1])) % 360), 0),
+               "uncertainty_m_s": round(float(uncertainty), 3),
+               "measured_u_east_m_s": round(float(measured_mean[0]), 3), "measured_v_north_m_s": round(float(measured_mean[1]), 3),
+               "measured_speed_m_s": round(float(np.hypot(*measured_mean)), 3),
+               "rotation": rotation, "reliability": reliability, "reasons": reasons,
+               "drone_speed_m_s": round(drone_speed, 2),
                "cells_used": len(good), "cells_total": len(cells),
                "scatter_m_s": None if scatter is None else round(scatter, 3),
-               "scale": round(float(np.median(scales)), 3) if scales else None,
+               "scale": None if scale_value is None else round(scale_value, 3),
                "depth_of_measurement_m": None}
     summary["direction_to_text"] = _compass(summary["direction_to_deg"])
-    if summary["scale"] and abs(summary["scale"] - 1) > 0.06:
-        notes.append(f"масштаб по дисперсии волн {summary['scale']:.2f} ≠ 1: высота над водой или наклон камеры "
-                     "неточны на эту долю — выровняйте кадр по горизонту/берегу и проверьте «Взлёт над водой»")
-    if moved > 15:
-        notes.append(f"дрон сместился на {moved:.0f} м за интервал: для течений лучше висение")
-    waves = _wave_statistics(pooled, k_east, k_north, omega, mean, resolution) if pooled is not None else {}
+    # The shell in the pooled spectrum sits where the picture shows it: with the apparent (measured) velocity.
+    waves = _wave_statistics(pooled, k_east, k_north, omega, measured_mean, resolution) if pooled is not None else {}
     if waves:
         summary["depth_of_measurement_m"] = round(waves["mean_wavelength_m"] / (4 * np.pi), 2)
 
@@ -493,8 +672,12 @@ def analyse(video_path: str, start_s: float | None, end_s: float | None, project
     folder = output_root / "waves"
     folder.mkdir(parents=True, exist_ok=True)
     stem = output_stem(folder, context, times[0], times[-1], "currents", (".png", ".json", ".csv", ".geo.json"))
-    overview = (map_sum / max(map_count, 1)).clip(0, 255).astype(np.uint8)
-    valid = overview.sum(axis=2) > 0
+    valid = map_count > 0
+    overview = (map_sum / np.maximum(map_count, 1)[..., None]).clip(0, 255).astype(np.uint8)
+    frame_path = folder / f"{stem}_frame.jpg"
+    if not imwrite(frame_path, _frame_view(cv2, first_frame, poses, centres, cell_m, [c["quality"] for c in cells]),
+                   [cv2.IMWRITE_JPEG_QUALITY, 88]):
+        frame_path = None
     image_path = folder / f"{stem}.png"
     if not imwrite(image_path, overview):
         raise RuntimeError("Не удалось сохранить карту")
@@ -518,15 +701,19 @@ def analyse(video_path: str, start_s: float | None, end_s: float | None, project
         "map": {"path": str(image_path), "size_px": [int(map_w), int(map_h)], "resolution_m_per_px": map_resolution,
                 "bounds_m": {"east": [float(lower[0]), float(lower[0] + map_w * map_resolution)],
                              "north": [float(lower[1]), float(lower[1] + map_h * map_resolution)]},
-                "geo_grid": georaster["geo_grid"]},
-        "method": "wind-wave dispersion shell fit, deep water; brightness spectra",
+                "geo_grid": georaster["geo_grid"],
+                # Water seen in the middle frame (far-left, far-right, near-right, near-left), for the outline.
+                "footprint_m": np.round(footprint, 1).tolist()},
+        "frame_view": None if frame_path is None else {"path": str(frame_path), "time_s": round(float(times[0]), 3)},
+        "method": "wind-wave dispersion shell fit, deep water; brightness spectra; camera rotation separated by the cell pattern",
     }
     json_path = folder / f"{stem}.json"
     csv_path = folder / f"{stem}.csv"
     result.update(path=str(json_path), csv_path=str(csv_path))
     json_path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     header = ["latitude", "longitude", "east_m", "north_m", "range_m", "u_east_m_s", "v_north_m_s", "speed_m_s",
-              "direction_to_deg", "halves_difference_m_s", "fit_rms_rad_s", "points", "scale", "quality"]
+              "direction_to_deg", "measured_u_east_m_s", "measured_v_north_m_s", "halves_difference_m_s",
+              "fit_rms_rad_s", "shell_share", "points", "scale", "quality"]
     lines = [";".join(header)] + [";".join("" if c.get(key) is None else str(c.get(key)) for key in header) for c in cells]
     csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
     progress(1.0, "Готово")

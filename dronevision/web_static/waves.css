@@ -17,7 +17,11 @@
 @media (max-width: 980px) { .waves-grid { grid-template-columns: 1fr; } }
 .waves-grid canvas { display: block; width: 100%; border-radius: 9px; }
 .waves-grid figure { margin: 0; min-width: 0; }
-.waves-grid figcaption { margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
+.waves-grid figcaption { margin: 4px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.waves-figure-title { display: block; margin: 0 0 5px; font-size: 13px; }
+#wavesFrame { display: block; width: 100%; border-radius: 9px; background: #101514; }
+#wavesSummary .waves-verdict { font-weight: 650; }
+#wavesSummary .waves-verdict.unreliable, #wavesSummary .waves-verdict.weak { color: #a13b32; }
 #wavesMap { background: #101514; cursor: crosshair; }
 #wavesSpectrum { background: #fff; }
 .waves-plots canvas { margin-bottom: 6px; background: #fff; }
@@ -30,5 +34,21 @@
 #wavesTable th { color: var(--muted); font-weight: 600; }
 #wavesTable tr.hover td { background: #eef4ee; }
 #wavesTable i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; }
-#wavesLinks { margin: 6px 0; }
+#wavesLinks, #iceLinks { margin: 6px 0; }
+/* «Дрейф льдин» (ice.js) shares the look of the currents panel. */
+#iceSummary p { margin: 0 0 6px; color: var(--ink); font-size: 13px; line-height: 1.5; }
+#iceSummary .waves-notes { color: #a13b32; }
+#iceSummary .waves-verdict { font-weight: 650; }
+#iceSummary .waves-verdict.unreliable, #iceSummary .waves-verdict.weak { color: #a13b32; }
+.ice-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 8px; font-size: 13px; cursor: pointer; }
+.ice-figure { margin: 0; }
+.ice-figure canvas { display: block; width: 100%; border-radius: 9px; background: #101514; cursor: crosshair; }
+.ice-figure figcaption { margin: 4px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+#iceTable { overflow: auto; max-height: 320px; margin: 10px 0; }
+#iceTable table { border-collapse: collapse; width: 100%; font-size: 12px; }
+#iceTable th, #iceTable td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+#iceTable th { position: sticky; top: 0; background: #fff; color: var(--muted); font-weight: 600; }
+#iceTable tr.hover td { background: #eef4ee; }
+#iceTable i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; }
+#icePath { white-space: pre-wrap; }
 #wavesPath { white-space: pre-wrap; }

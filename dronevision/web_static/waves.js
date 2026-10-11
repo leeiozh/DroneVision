@@ -5,7 +5,29 @@ DV.waves = (() => {
   const q = selector => document.querySelector(selector);
   const compass = degrees => ['С', 'ССВ', 'СВ', 'ВСВ', 'В', 'ВЮВ', 'ЮВ', 'ЮЮВ', 'Ю', 'ЮЮЗ', 'ЮЗ', 'ЗЮЗ', 'З', 'ЗСЗ', 'СЗ', 'ССЗ'][Math.round(degrees / 22.5) % 16];
   const QUALITY = {good: ['#2fd08a', 'надёжно'], weak: ['#ffb02e', 'неуверенно'], failed: ['#ff5b45', 'нет решения']};
+  const VERDICT = {good: 'надёжно', weak: 'неуверенно', unreliable: 'ненадёжно — числу верить нельзя'};
   let current = null, hover = -1, background = null;
+  const view = {z: 1, px: 0, py: 0};
+
+  // Wheel zoom about the cursor and dragging for a map canvas; `view` = {z, px, py} is applied by zoomed().
+  // Double click returns the whole map.
+  function zoomable(canvas, view, redraw) {
+    const clamp = () => {const w = canvas.clientWidth, h = canvas.clientHeight; if (view.z <= 1) {view.z = 1; view.px = view.py = 0} view.px = Math.min(0, Math.max(w - w * view.z, view.px)); view.py = Math.min(0, Math.max(h - h * view.z, view.py))};
+    let drag = null;
+    canvas.addEventListener('wheel', event => {
+      event.preventDefault();
+      const r = canvas.getBoundingClientRect(), mx = event.clientX - r.left, my = event.clientY - r.top, z = Math.max(1, Math.min(24, view.z * (event.deltaY < 0 ? 1.25 : 0.8)));
+      view.px = mx - (mx - view.px) * z / view.z; view.py = my - (my - view.py) * z / view.z; view.z = z; clamp(); redraw();
+    }, {passive: false});
+    canvas.addEventListener('pointerdown', event => {if (event.button !== 0 || view.z <= 1) return; drag = {x: event.clientX, y: event.clientY, px: view.px, py: view.py}; canvas.setPointerCapture(event.pointerId); canvas.style.cursor = 'grabbing'});
+    canvas.addEventListener('pointermove', event => {if (!drag) return; view.px = drag.px + event.clientX - drag.x; view.py = drag.py + event.clientY - drag.y; clamp(); redraw()});
+    ['pointerup', 'pointercancel'].forEach(name => canvas.addEventListener(name, () => {drag = null; canvas.style.cursor = ''}));
+    canvas.addEventListener('dblclick', () => {view.z = 1; clamp(); redraw()});
+  }
+  // The fitted map geometry with the zoom and shift of `view` on top.
+  function zoomed(m, view) {
+    return {scale: m.scale * view.z, x: e => view.px + m.x(e) * view.z, y: n => view.py + m.y(n) * view.z, x0: view.px + m.x0 * view.z, y0: view.py + m.y0 * view.z, width: m.width * view.z, height: m.height * view.z};
+  }
 
   function fit(canvas, height) {
     const dpr = devicePixelRatio || 1, w = Math.max(240, canvas.clientWidth);
@@ -30,7 +52,7 @@ DV.waves = (() => {
   function mapGeometry(w, h) {
     const b = current.map.bounds_m, spanE = b.east[1] - b.east[0], spanN = b.north[1] - b.north[0], scale = Math.min(w / spanE, h / spanN);
     const x0 = (w - spanE * scale) / 2, y0 = (h - spanN * scale) / 2;
-    return {scale, x: e => x0 + (e - b.east[0]) * scale, y: n => y0 + (b.north[1] - n) * scale, x0, y0, width: spanE * scale, height: spanN * scale};
+    return zoomed({scale, x: e => x0 + (e - b.east[0]) * scale, y: n => y0 + (b.north[1] - n) * scale, x0, y0, width: spanE * scale, height: spanN * scale}, view);
   }
   function drawMap() {
     const canvas = q('#wavesMap'); if (!current || !canvas) return;
@@ -39,13 +61,26 @@ DV.waves = (() => {
     const m = mapGeometry(w, h);
     g.fillStyle = '#101514'; g.fillRect(0, 0, w, h);
     if (background && background.complete && background.naturalWidth) g.drawImage(background, m.x0, m.y0, m.width, m.height);
+    // Water seen in the frame: the trapezoid the cells were chosen in, with the line of sight from the drone.
+    const print = current.map.footprint_m, camera = current.camera_m;
+    if (print) {
+      g.save(); g.setLineDash([6, 4]); g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 1.2; g.beginPath();
+      print.forEach(([e, n], i) => i ? g.lineTo(m.x(e), m.y(n)) : g.moveTo(m.x(e), m.y(n))); g.closePath(); g.stroke();
+      const far = [(print[0][0] + print[1][0]) / 2, (print[0][1] + print[1][1]) / 2];
+      g.strokeStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.moveTo(m.x(camera[0]), m.y(camera[1])); g.lineTo(m.x(far[0]), m.y(far[1])); g.stroke(); g.restore();
+      g.font = '11px system-ui'; g.fillStyle = 'rgba(255,255,255,.85)'; g.fillText('поле зрения кадра', m.x(print[0][0]) + 6, m.y(print[0][1]) + 14);
+    }
+    const turned = current.summary.rotation && current.summary.rotation.applied;
     const speeds = current.cells.filter(c => c.speed_m_s != null).map(c => c.speed_m_s), top = Math.max(0.1, ...speeds);
     const unit = current.cell_m * m.scale * 0.42 / top;      // the fastest vector spans 0.42 of a cell
     g.font = '600 11px system-ui';
     current.cells.forEach((c, i) => {
       const x = m.x(c.east_m), y = m.y(c.north_m), half = c.size_m * m.scale / 2, [color] = QUALITY[c.quality];
       g.strokeStyle = i === hover ? '#fff' : 'rgba(255,255,255,.35)'; g.lineWidth = i === hover ? 2 : 1; g.strokeRect(x - half, y - half, 2 * half, 2 * half);
+      g.fillStyle = 'rgba(255,255,255,.9)'; g.fillText(String(i + 1), x - half + 4, y - half + 13);
       if (c.speed_m_s == null) {g.fillStyle = color; g.fillText('×', x - 3, y + 4); return}
+      // Thin grey: what the picture shows before the camera turn is taken out (clipped to the cell).
+      if (turned) {const k = Math.min(1, half / Math.max(1, Math.hypot(c.measured_u_east_m_s, c.measured_v_north_m_s) * unit)); arrow(g, x, y, c.measured_u_east_m_s * unit * k, -c.measured_v_north_m_s * unit * k, 'rgba(200,205,202,.75)', 1.2)}
       arrow(g, x, y, c.u_east_m_s * unit, -c.v_north_m_s * unit, color);
     });
     // camera and scale
@@ -88,8 +123,8 @@ DV.waves = (() => {
     // current direction
     const sum = current.summary, u = sum.u_east_m_s, v = sum.v_north_m_s, length = Math.hypot(u, v) || 1;
     arrow(g, centre[0], centre[1], u / length * size * 0.18, -v / length * size * 0.18, '#ff5b45', 2);
-    g.fillStyle = 'var(--muted)'; g.fillStyle = '#69736f'; g.textAlign = 'center';
-    g.fillText('куда идут волны · кольца — длина волны · красная стрелка — течение', w / 2, y0 + size + 18); g.textAlign = 'left';
+    g.fillStyle = '#69736f'; g.textAlign = 'center';
+    g.fillText('направление — куда идут волны · кольца — длина волны', w / 2, y0 + size + 18); g.textAlign = 'left';
   }
 
   function plot(canvas, xs, ys, options) {
@@ -106,31 +141,32 @@ DV.waves = (() => {
   function drawPlots() {
     const wv = current.waves; if (!wv.frequency) return;
     const f = wv.frequency.hz, top = Math.min(Math.max(...f), Math.max(1.2, 3 * wv.observed_peak_frequency_hz));
-    plot(q('#wavesFrequency'), f, wv.frequency.energy, {title: 'Частотный спектр яркости (как видит неподвижный наблюдатель), Гц', x0: 0, x1: top,
+    plot(q('#wavesFrequency'), f, wv.frequency.energy, {title: 'Частотный спектр: энергия по частоте, Гц', x0: 0, x1: top,
       ticks: [0, 0.2, 0.4, 0.6, 0.8, 1, 1.5, 2, 3], marks: [[wv.observed_peak_frequency_hz, `пик ${wv.observed_peak_frequency_hz.toFixed(2)} Гц`]]});
-    plot(q('#wavesDirection'), wv.direction.to_deg, wv.direction.energy, {title: 'Распределение энергии по направлению (куда идут волны)', x0: 0, x1: 360,
+    plot(q('#wavesDirection'), wv.direction.to_deg, wv.direction.energy, {title: 'Энергия по направлению (куда идут волны)', x0: 0, x1: 360,
       ticks: [0, 90, 180, 270, 360], label: t => ['С', 'В', 'Ю', 'З', 'С'][t / 90], marks: [[wv.mean_direction_to_deg, `среднее ${wv.mean_direction_to_deg.toFixed(0)}°`]]});
-    const k = wv.wavenumber.k_rad_m.map(v => Math.log10(2 * Math.PI / v));
-    plot(q('#wavesLength'), k.slice().reverse(), wv.wavenumber.energy.slice().reverse(), {title: 'Распределение энергии по длине волны, м', ticks: [-1, -0.699, -0.301, 0, 0.301, 0.699, 1, 1.301, 1.699, 2],
-      label: t => String(Math.round(10 ** t * 100) / 100), marks: [[Math.log10(wv.peak_wavelength_m), `пик ${wv.peak_wavelength_m} м`]]});
   }
 
   function table() {
     const body = current.cells.map((c, i) => {
       const [color, label] = QUALITY[c.quality];
-      if (c.speed_m_s == null) return `<tr data-cell="${i}"><td>${i + 1}</td><td>${c.range_m}</td><td colspan="5">—</td><td><i style="background:${color}"></i>${label}</td></tr>`;
-      return `<tr data-cell="${i}"><td>${i + 1}</td><td>${c.range_m}</td><td><b>${c.speed_m_s.toFixed(2)}</b></td><td>${c.direction_to_deg.toFixed(0)}° ${compass(c.direction_to_deg)}</td><td>${c.u_east_m_s.toFixed(2)}</td><td>${c.v_north_m_s.toFixed(2)}</td><td>${c.halves_difference_m_s == null ? '—' : c.halves_difference_m_s.toFixed(2)}</td><td><i style="background:${color}"></i>${label}${c.one_direction ? ' · волны одного направления' : ''}</td></tr>`;
+      if (c.speed_m_s == null) return `<tr data-cell="${i}"><td>${i + 1}</td><td>${c.range_m}</td><td colspan="6">—</td><td><i style="background:${color}"></i>${label}</td></tr>`;
+      return `<tr data-cell="${i}"><td>${i + 1}</td><td>${c.range_m}</td><td><b>${c.speed_m_s.toFixed(2)}</b></td><td>${c.direction_to_deg.toFixed(0)}° ${compass(c.direction_to_deg)}</td><td>${c.u_east_m_s.toFixed(2)}</td><td>${c.v_north_m_s.toFixed(2)}</td><td>${c.measured_u_east_m_s == null ? '—' : Math.hypot(c.measured_u_east_m_s, c.measured_v_north_m_s).toFixed(2)}</td><td>${c.halves_difference_m_s == null ? '—' : c.halves_difference_m_s.toFixed(2)}</td><td><i style="background:${color}"></i>${label}${c.one_direction ? ' · волны одного направления' : ''}</td></tr>`;
     }).join('');
-    q('#wavesTable').innerHTML = `<table><thead><tr><th>№</th><th>дальность, м</th><th>скорость, м/с</th><th>куда</th><th>на восток</th><th>на север</th><th title="Расхождение между первой и второй половиной записи">разброс, м/с</th><th>оценка</th></tr></thead><tbody>${body}</tbody></table>`;
+    q('#wavesTable').innerHTML = `<table><thead><tr><th>№</th><th>дальность, м</th><th>скорость, м/с</th><th>куда</th><th>на восток</th><th>на север</th><th title="Скорость, как она видна в кадре, до исключения поворота камеры">в кадре, м/с</th><th title="Расхождение между первой и второй половиной записи">разброс, м/с</th><th>оценка</th></tr></thead><tbody>${body}</tbody></table>`;
     q('#wavesTable').querySelectorAll('tr[data-cell]').forEach(row => {row.onmouseenter = () => {hover = Number(row.dataset.cell); drawMap(); highlightRow()}});
   }
 
   function show(result, restored = false) {
-    current = result; hover = -1;
+    current = result; hover = -1; view.z = 1; view.px = view.py = 0;
     const section = q('#wavesResult'), s = result.summary, w = result.waves || {}, a = result.attitude, [t0, t1] = result.interval_s;
     section.hidden = false;
-    q('#wavesTitle').textContent = `${s.speed_m_s.toFixed(2)} м/с на ${s.direction_to_text} (${s.direction_to_deg.toFixed(0)}°) · ${clock(t0)}–${clock(t1)}`;
-    const lines = [`Поверхностное течение (верхние ~${s.depth_of_measurement_m ?? 0.5} м): на восток ${s.u_east_m_s.toFixed(2)}, на север ${s.v_north_m_s.toFixed(2)} м/с · участков ${s.cells_used} из ${s.cells_total}${s.scatter_m_s != null ? ` · разброс между участками ${s.scatter_m_s.toFixed(2)} м/с` : ''}.`];
+    const verdict = s.reliability || 'good', error = s.uncertainty_m_s != null ? ` ± ${s.uncertainty_m_s.toFixed(2)}` : '', turn = s.rotation;
+    q('#wavesTitle').textContent = `${verdict === 'unreliable' ? 'Течение не определено · в кадре ' : ''}${s.speed_m_s.toFixed(2)}${error} м/с на ${s.direction_to_text} (${s.direction_to_deg.toFixed(0)}°) · ${clock(t0)}–${clock(t1)}`;
+    const lines = [`<span class="waves-verdict ${verdict}">Оценка: ${VERDICT[verdict]}${s.reasons && s.reasons.length ? ' — ' + s.reasons.join('; ') : ''}.</span>`,
+      `Поверхностное течение (верхние ~${s.depth_of_measurement_m ?? 0.5} м): ${s.speed_m_s.toFixed(2)}${error} м/с — на восток ${s.u_east_m_s.toFixed(2)}, на север ${s.v_north_m_s.toFixed(2)} · участков ${s.cells_used} из ${s.cells_total}${s.scatter_m_s != null ? ` · разброс между участками ${s.scatter_m_s.toFixed(2)} м/с` : ''}.`];
+    if (turn && turn.applied) lines.push(`В кадре видно ${s.measured_speed_m_s.toFixed(2)} м/с, но из них ${turn.false_current_m_s.toFixed(2)} м/с — поворот картинки вокруг дрона на ${Math.abs(turn.omega_deg_s).toFixed(3)} ± ${turn.omega_sigma_deg_s.toFixed(3)}°/с (увод курса камеры): он вычтен. На карте серые стрелки — до поправки, цветные — после.`);
+    else if (turn) lines.push(`Проверка поворота картинки по участкам: ${turn.omega_deg_s.toFixed(3)} ± ${turn.omega_sigma_deg_s.toFixed(3)}°/с${a.yaw_from_image ? ' (курс отслежен по горизонту, поправка не нужна)' : ''}.`);
     if (w.systems && w.systems.length) lines.push(`Волнение: ${w.systems.map(x => `с ${compass(x.direction_from_deg)} (идёт на ${x.direction_to_deg.toFixed(0)}°), длина ${x.wavelength_m} м, период ${x.period_s} с, доля ${Math.round(x.share * 100)}%`).join('; ')}. Пик спектра ${w.peak_wavelength_m} м / ${w.peak_period_s} с, угловой разброс ${w.directional_spread_deg}°.`);
     const checks = [];
     if (a.horizon) checks.push(`наклон камеры по горизонту ${a.horizon_pitch_deg.toFixed(2)}° (в логе ${a.log_pitch_deg.toFixed(2)}°)`); else checks.push('горизонт не найден — углы из лога');
@@ -142,6 +178,9 @@ DV.waves = (() => {
     q('#wavesPath').textContent = `${result.path}\n${result.csv_path}`;
     const links = q('#wavesLinks'); links.innerHTML = '';
     links.append(DV.exportRow({path: result.map.path}, pngLink(`/api/raster?path=${encodeURIComponent(result.map.path)}&saved=1`, 'Открыть карту PNG')));
+    const b = result.map.bounds_m;
+    q('#wavesMapCaption').textContent = `Осреднённый снимок воды, север сверху, ${Math.round(b.east[1] - b.east[0])} × ${Math.round(b.north[1] - b.north[0])} м. Пунктир — вода, попавшая в кадр; белая точка — дрон. Квадраты ${result.cell_m} м — участки расчёта: программа ставит их там, где кадр достаточно подробен, чтобы различать волны (пиксель на воде не крупнее ${(2.4 * result.resolution_m_per_px).toFixed(1)} м), — ближе к горизонту волны сливаются. Стрелки — течение: зелёные — надёжные, оранжевые — неуверенные. Наведите на участок; колесо — зум, перетаскивание — сдвиг, двойной щелчок — вся карта.`;
+    const frame = q('#wavesFrame'); frame.closest('figure').hidden = !result.frame_view; if (result.frame_view) frame.src = `/api/wave-frame?path=${encodeURIComponent(result.path)}&t=${Date.now()}`;
     table();
     background = new Image(); background.onload = drawMap; background.src = `/api/raster?path=${encodeURIComponent(result.map.path)}&saved=1&t=${Date.now()}`;
     drawMap(); drawSpectrum(); drawPlots();
@@ -161,7 +200,8 @@ DV.waves = (() => {
     try {
       const result = await api('/api/wave-currents', {method: 'POST', body: JSON.stringify(body)});
       show(result); DV.session.setResult('waves', {path: result.path});
-      activity(status, `Готово: течение ${result.summary.speed_m_s.toFixed(2)} м/с на ${result.summary.direction_to_text}. Результат — в панели внизу.`, 'done');
+      const verdict = result.summary.reliability || 'good';
+      activity(status, verdict === 'unreliable' ? 'Расчёт выполнен, но результат ненадёжен — причины в панели внизу.' : `Готово: течение ${result.summary.speed_m_s.toFixed(2)} м/с на ${result.summary.direction_to_text} (${VERDICT[verdict]}). Результат — в панели внизу.`, verdict === 'unreliable' ? 'error' : 'done');
     } catch (error) {activity(status, error.message, 'error')} finally {clearInterval(timer); button.disabled = false}
   }
   async function restore(saved) {show(await api(`/api/wave-result?path=${encodeURIComponent(saved.path)}`), true)}
@@ -171,8 +211,9 @@ DV.waves = (() => {
     button.onclick = () => run();
     q('#wavesMap').addEventListener('mousemove', event => {if (current) mapHover(event)});
     q('#wavesMap').addEventListener('mouseleave', () => {hover = -1; if (current) {drawMap(); highlightRow()}});
+    zoomable(q('#wavesMap'), view, () => {if (current) drawMap()});
     window.addEventListener('resize', redraw);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else setTimeout(bind, 0);
-  return {show, restore, hide: () => {q('#wavesResult').hidden = true; current = null}};
+  return {show, restore, hide: () => {q('#wavesResult').hidden = true; current = null}, draw: {fit, arrow, zoomable, zoomed}, compass, QUALITY, VERDICT};
 })();

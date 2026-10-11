@@ -58,7 +58,7 @@ const rates=[0.25,0.5,1,2,4];let rateIndex=2;
 const timeline=document.querySelector('#videoTimeline'),playButton=document.querySelector('#togglePlay'),rateButton=document.querySelector('#playbackRate');
 const horizonOffset=document.querySelector('#horizonOffset'),horizonLine=document.querySelector('#horizonLine'),videoWrap=document.querySelector('#videoWrap'),bottomCropLine=document.querySelector('#bottomCropLine'),bottomCropPercent=document.querySelector('#bottomCropPercent');
 // Messages of the previous processing do not belong to a newly opened video: back to the texts of index.html.
-const statusDefaults=['projectionStatus','mosaicStatus','wavesStatus','calibrateStatus'].map(id=>[document.querySelector('#'+id),document.querySelector('#'+id).textContent]);
+const statusDefaults=['projectionStatus','mosaicStatus','wavesStatus','iceStatus','calibrateStatus'].map(id=>[document.querySelector('#'+id),document.querySelector('#'+id).textContent]);
 function resetStatuses(){statusDefaults.forEach(([node,text])=>activity(node,text))}
 function mediaUrl(path,quality){return `/api/video?path=${encodeURIComponent(path)}&quality=${encodeURIComponent(quality)}`}
 // Date and time of shooting for a moment of the video: the camera clock (as in the SRT) and UTC.

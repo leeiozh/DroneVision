@@ -8,7 +8,7 @@
 // the session keeps their description, not the pixels.
 DV.session = (() => {
   const FIELDS = ['project_dir', 'yaw_offset_deg', 'takeoff_height_m', 'mosaic_max_distance_m', 'projection_resolution_m'];
-  const results = {projection: null, mosaic: null, waves: null};
+  const results = {projection: null, mosaic: null, waves: null, ice: null};
   let dirty = false, resultsDirty = false, restoring = false, busy = false, lastLight = '';
   const ready = () => {try {return !!viewer} catch (e) {return false}};   // app.js not loaded yet -> not ready
   const statusNode = () => document.querySelector('#sessionStatus');
@@ -58,15 +58,15 @@ DV.session = (() => {
 
   // Another video was opened: the results on screen belong to the previous one (the files stay in the project folder).
   function clearResults() {
-    document.querySelector('#projectionResult').hidden = true; document.querySelector('#mosaicResult').hidden = true; DV.waves.hide();
-    results.projection = null; results.mosaic = null; results.waves = null; resultsDirty = true; touch();
+    document.querySelector('#projectionResult').hidden = true; document.querySelector('#mosaicResult').hidden = true; DV.waves.hide(); DV.ice.hide();
+    results.projection = null; results.mosaic = null; results.waves = null; results.ice = null; resultsDirty = true; touch();
   }
 
   const rasterUrl = paths => (index, saved) => `/api/raster?path=${encodeURIComponent(paths[index])}${saved ? '&saved=1' : ''}&t=${Date.now()}`;
   function showResults(saved) {
     const notes = [];
     document.querySelector('#projectionResult').hidden = true; document.querySelector('#mosaicResult').hidden = true;
-    results.projection = null; results.mosaic = null; results.waves = null; DV.waves.hide();
+    results.projection = null; results.mosaic = null; results.waves = null; results.ice = null; DV.waves.hide(); DV.ice.hide();
     const projection = saved.projection, mosaic = saved.mosaic;
     try {
       if (projection && projection.result) {
@@ -86,6 +86,10 @@ DV.session = (() => {
     if (saved.waves && saved.waves.path) {
       results.waves = saved.waves;
       DV.waves.restore(saved.waves).catch(error => {results.waves = null; say(`течения не восстановлены: ${error.message}`, true)});
+    }
+    if (saved.ice && saved.ice.path) {
+      results.ice = saved.ice;
+      DV.ice.restore(saved.ice).catch(error => {results.ice = null; say(`дрейф льдин не восстановлен: ${error.message}`, true)});
     }
     return notes;
   }

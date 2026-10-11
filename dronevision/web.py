@@ -209,6 +209,27 @@ class Handler(SimpleHTTPRequestHandler):
             if result.get("kind") != "wave_currents":
                 return self._json({"error": "Это не результат расчёта течений"}, 400)
             return self._json(result)
+        if parsed.path == "/api/ice-result":
+            # A result of «Дрейф льдин» saved earlier (restoring a session).
+            source = Path(parse_qs(parsed.query).get("path", [""])[0]).expanduser().resolve()
+            if source.suffix.lower() != ".json" or "_icedrift" not in source.name or not source.is_file():
+                return self._json({"error": "Результат расчёта дрейфа льдин не найден"}, 404)
+            result = json.loads(source.read_text(encoding="utf-8"))
+            if result.get("kind") != "ice_drift":
+                return self._json({"error": "Это не результат расчёта дрейфа льдин"}, 400)
+            return self._json(result)
+        if parsed.path == "/api/wave-frame":
+            # The video frame with the cell outlines, saved next to a result of «Течения и спектр волн».
+            source = Path(parse_qs(parsed.query).get("path", [""])[0]).expanduser().resolve()
+            picture = source.with_name(source.stem + "_frame.jpg")
+            if source.suffix.lower() != ".json" or "_currents" not in source.name or not picture.is_file():
+                return self._json({"error": "Кадр с участками не найден"}, 404)
+            data = picture.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers(); self.wfile.write(data); return
         if parsed.path == "/api/mosaic-result":
             with LOCK:
                 result = MOSAIC_STATE.get("result")
@@ -370,11 +391,15 @@ class Handler(SimpleHTTPRequestHandler):
                 extra = {key: payload[key] for key in ("method", "measured_at_s", "yaw_offset_deg") if key in payload}
                 return self._json(save_alignment(payload["video_path"], float(payload.get("pitch_offset_deg") or 0.0),
                                                  float(payload.get("roll_offset_deg") or 0.0), **extra))
-            if self.path == "/api/wave-currents":
-                from .wavefield import analyse
+            if self.path in ("/api/wave-currents", "/api/ice-drift"):
+                # Both long calculations share one progress state: only one of them runs at a time.
+                if self.path == "/api/ice-drift":
+                    from .icedrift import analyse
+                else:
+                    from .wavefield import analyse
                 with LOCK:
                     if WAVE_STATE["running"]:
-                        return self._json({"error": "Расчёт течений уже выполняется"}, 409)
+                        return self._json({"error": "Другой расчёт (течения или дрейф льдин) уже выполняется"}, 409)
                     WAVE_STATE.update(running=True, progress=0.0, message="Подготовка")
 
                 def progress(share, text):

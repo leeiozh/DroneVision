@@ -118,6 +118,10 @@
 }
 
 .overlay-check { display: flex; align-items: center; gap: 4px; color: var(--ink); cursor: pointer; }
+.bathymetry-levels { display: flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; }
+.bathymetry-levels input { width: 128px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; font: 11px ui-monospace, monospace; }
+.bathymetry-status { color: var(--muted); font-size: 11px; }
+.bathymetry-status.bad { color: #a13b32; }
 .annotate-status { color: var(--muted); font-size: 11px; }
 
 .projection-canvas-wrap.drawing-mode { cursor: crosshair; }

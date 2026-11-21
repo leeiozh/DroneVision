@@ -164,7 +164,11 @@ DV.coast = (() => {
     q('#coastReset').onclick = () => reset();
     dragLayer.addEventListener('pointerdown', event => {
       if (!st.info) return;
-      st.drag = {x: event.clientX, y: event.clientY, yaw: yawOffset(), pitch: st.pitch}; try {dragLayer.setPointerCapture(event.pointerId)} catch (e) {} event.preventDefault();
+      st.drag = {x: event.clientX, y: event.clientY, yaw: yawOffset(), pitch: st.pitch}; try {dragLayer.setPointerCapture(event.pointerId)} catch (e) {}
+      // The drag layer lives inside videoWrap.  Without stopping propagation this same press also
+      // reaches videoWrap's "place horizon here" handler, so merely grabbing the coast silently
+      // moves the crop line to the pointer (the observed +0.2% -> +17.8% jump).
+      event.preventDefault(); event.stopPropagation();
     });
     dragLayer.addEventListener('pointermove', event => {
       if (!st.drag) return;
@@ -189,5 +193,7 @@ DV.coast = (() => {
     const h = seriesAt('height') + (Number(form.elements.takeoff_height_m.value) || 0);
     return h > 0 ? Math.sqrt(2 * h / (6371000 / 0.87)) / rad : 0;
   }
-  return {check, pitchOffset: () => st.pitch, rollOffset: () => st.roll, dip, state: st};
+  return {check, pitchOffset: () => st.pitch, rollOffset: () => st.roll,
+    // frame_poses already includes the saved sidecar; only the unsaved live delta must be added.
+    attitudeCorrection: () => [0, st.pitch - st.saved.pitch, st.roll - st.saved.roll], dip, state: st};
 })();

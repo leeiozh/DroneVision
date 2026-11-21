@@ -18,6 +18,9 @@ bin/ffmpeg.exe
 bin/ffprobe.exe
 bin/uv/
 .dv-write-test
+maps/GEBCO*.nc
+maps/GEBCO*.zip
+maps/GEBCO*/
 
 # This computer's settings and results
 dronevision_settings.json

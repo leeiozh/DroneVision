@@ -5,6 +5,8 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import json
 import mimetypes
 from pathlib import Path
+import subprocess
+import sys
 import threading
 import traceback
 from urllib.parse import parse_qs, quote, urlparse
@@ -30,11 +32,16 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except OSError:
+            # A page navigation or a replaced fetch can close localhost while its response is
+            # being written.  It is not a server failure and must not produce a traceback.
+            self.close_connection = True
 
     def _payload(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -157,6 +164,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"path": str(path), "parent": str(path.parent), "entries": entries[:500]})
             except PermissionError:
                 return self._json({"error": "Нет доступа к папке"}, 403)
+        if parsed.path == "/api/bathymetry-settings":
+            from .bathymetry import status
+            return self._json(status())
         if parsed.path.startswith("/api/result"):
             with LOCK:
                 output = STATE.get("output")
@@ -276,6 +286,7 @@ class Handler(SimpleHTTPRequestHandler):
                     float(payload.get("yaw_offset_deg") or 0.0),
                     adjustments=payload.get("adjustments"),
                     bottom_crop_percent=float(payload.get("bottom_crop_percent") or 0.0),
+                    attitude_correction_deg=payload.get("attitude_correction_deg"),
                     max_distance_m=float(payload.get("max_distance_m") or 0.0),   # 0 = down to the horizon
                 )
                 result = {"variants": [variant], "time_s": variant["time_s"], "frame_index": variant["frame_index"]}
@@ -422,6 +433,19 @@ class Handler(SimpleHTTPRequestHandler):
             if self.path == "/api/data-root":
                 from .catalog import choose_data_root
                 return self._json(choose_data_root(payload["path"]))
+            if self.path == "/api/bathymetry-path":
+                from .bathymetry import status
+                from .paths import set_bathymetry_path
+                set_bathymetry_path(payload["path"])
+                return self._json(status())
+            if self.path == "/api/bathymetry":
+                from .bathymetry import contours
+                reference = payload.get("takeoff") or payload.get("reference") or {}
+                lat = reference.get("latitude")
+                lon = reference.get("longitude")
+                if lat is None or lon is None:
+                    raise ValueError("В результате нет координат точки взлёта")
+                return self._json(contours(float(lat), float(lon), payload["bounds_m"], payload.get("levels_m")))
             if self.path == "/api/session/save":
                 from .session import save_session
                 return self._json(save_session(payload.get("session"), payload.get("path"),
@@ -474,6 +498,25 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
 
 
+def _open_browser(url: str) -> None:
+    """Open the UI without coupling Chromium's helper processes to this terminal.
+
+    Brave/Chromium can print harmless zygote ``Broken pipe`` diagnostics when an URL is handed to
+    an already running browser.  More importantly, inherited pipes make a browser-side failure look
+    like a DroneVision failure.  ``xdg-open`` is detached and silenced on Linux; other platforms use
+    Python's normal browser integration.
+    """
+    if sys.platform.startswith("linux"):
+        try:
+            subprocess.Popen(["xdg-open", url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+            return
+        except OSError:
+            pass
+    import webbrowser
+    webbrowser.open(url)
+
+
 def serve(host="127.0.0.1", port=8765, open_browser=False):
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}"
     try:
@@ -482,13 +525,11 @@ def serve(host="127.0.0.1", port=8765, open_browser=False):
         # Usually a second start: the first copy is still running in another window.
         print(f"Порт {port} занят ({exc}).\nЕсли DroneVision уже запущен, он открыт по адресу {url}")
         if open_browser:
-            import webbrowser
-            webbrowser.open(url)
+            _open_browser(url)
         return
     print(f"DroneVision: {url}\nЭто окно должно оставаться открытым. Остановить: Ctrl+C или закрыть окно.")
     if open_browser:
-        import webbrowser
-        threading.Timer(0.8, webbrowser.open, args=(url,)).start()
+        threading.Timer(0.8, _open_browser, args=(url,)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

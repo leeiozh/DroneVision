@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import threading
 from datetime import datetime, timezone
 
 import numpy as np
@@ -13,6 +14,10 @@ from .paths import cache_dir, is_video, run_tool, tool
 from .geometry import CAMERA_PROFILES, camera_profile, focal_length_px, horizontal_fov_deg
 from .telemetry import interpolate, read_dji_log
 from .video import probe
+
+
+_PROXY_LOCKS: dict[Path, threading.Lock] = {}
+_PROXY_LOCKS_GUARD = threading.Lock()
 
 
 SRT_ROW = re.compile(
@@ -122,19 +127,27 @@ def proxy_path(video_path: str, height: int = 720) -> Path:
 def ensure_proxy(video_path: str, height: int = 720) -> Path:
     source = safe_media_path(video_path)
     target = proxy_path(str(source), height)
-    if target.is_file() and target.stat().st_size > 1024:
+    with _PROXY_LOCKS_GUARD:
+        lock = _PROXY_LOCKS.setdefault(target, threading.Lock())
+    with lock:
+        if target.is_file() and target.stat().st_size > 1024:
+            return target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(".part.mp4")
+        # This is a disposable playback copy, not an export.  Ultrafast H.264 and fast bilinear
+        # scaling make the first opening substantially quicker; the result is cached by source
+        # path, size and mtime, so subsequent openings do no conversion at all.
+        command = [tool("ffmpeg"), "-y", "-v", "error", "-i", str(source), "-map", "0:v:0",
+                   "-vf", f"scale=-2:{height}:flags=fast_bilinear", "-c:v", "libx264",
+                   "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "28",
+                   "-g", "30", "-keyint_min", "30", "-an", "-map_metadata", "0",
+                   "-movflags", "+faststart", str(temporary)]
+        result = run_tool(command)
+        if result.returncode:
+            temporary.unlink(missing_ok=True)
+            raise RuntimeError(f"Не удалось создать proxy: {result.stderr.strip()}")
+        os.replace(temporary, target)
         return target
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(".part.mp4")
-    command = [tool("ffmpeg"), "-y", "-v", "error", "-i", str(source), "-map", "0:v:0", "-vf", f"scale=-2:{height}",
-               "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-g", "30", "-keyint_min", "30",
-               "-an", "-movflags", "+faststart", str(temporary)]
-    result = run_tool(command)
-    if result.returncode:
-        temporary.unlink(missing_ok=True)
-        raise RuntimeError(f"Не удалось создать proxy: {result.stderr.strip()}")
-    os.replace(temporary, target)
-    return target
 
 
 def _pose_offsets(video: Path) -> dict:

@@ -31,7 +31,19 @@ def _find_near(video: Path, name: str | None = None, directory: str | None = Non
     if directory:
         root = Path(directory).expanduser()
         return list(root.glob(name or "*")) if root.is_dir() else []
-    roots = [video.parent, *list(video.parents)[:5]]
+    # Search near the recording, but never at a filesystem/mount root.  For a video such as
+    # /media/user/disk/DRONE/x.mp4 the old five-parent slice reached /media and /; ``/*.txt`` and
+    # ``/*/*.txt`` then scanned the whole machine and held a CPU core for ~90 seconds on every start.
+    roots = []
+    for index, root in enumerate(list(video.parents)[:6]):
+        if root == Path(root.anchor) or len(root.parts) < 3:
+            break
+        # Do not enumerate an entire removable disk.  Its immediate child (the folder containing
+        # the video) has already been searched, while the catalogue index below handles logs kept
+        # elsewhere inside the configured data folder.
+        if index and root.is_mount():
+            break
+        roots.append(root)
     found = []
     for root in roots:
         patterns = [name] if name else ["FlightRecords/*.txt", "logs/*.json", "*.txt", "*.json"]

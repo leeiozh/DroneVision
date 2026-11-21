@@ -27,7 +27,7 @@ VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
 
 
 def settings() -> dict:
-    """Optional ``dronevision_settings.json``: {"data_root": "D:/DroneData", "coastline": "..."}.
+    """Optional settings: data root, coastline and/or a GEBCO ``bathymetry`` path.
 
     Backslashes are taken literally, so a path pasted from Explorer (``D:\\DroneData``) is accepted
     as it is; a BOM written by Notepad is ignored.
@@ -55,7 +55,7 @@ def _read_settings(path: Path) -> dict:
         # json.loads then silently turns that part into a control character.  Retry as an Explorer
         # path only for the path-valued settings.  Properly escaped JSON never contains controls.
         if isinstance(raw, dict) and any(isinstance(raw.get(key), str) and any(ord(c) < 32 for c in raw[key])
-                                         for key in ("data_root", "coastline")):
+                                         for key in ("data_root", "coastline", "bathymetry")):
             try:
                 raw = json.loads(text.replace("\\", "\\\\"))
             except ValueError:
@@ -143,6 +143,36 @@ def set_data_root(path: str | Path) -> Path:
     temporary.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(temporary, USER_SETTINGS_FILE)
     return chosen
+
+
+def set_bathymetry_path(path: str | Path) -> Path:
+    """Remember a user-provided GEBCO NetCDF file (or a directory of NetCDF tiles)."""
+    chosen = Path(str(path)).expanduser().resolve()
+    if not chosen.is_file() and not chosen.is_dir():
+        raise ValueError(f"Файл или папка батиметрии не найдены: {chosen}")
+    stored = user_settings()
+    stored["bathymetry"] = str(chosen)
+    USER_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = USER_SETTINGS_FILE.with_name(USER_SETTINGS_FILE.name + ".part")
+    temporary.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporary, USER_SETTINGS_FILE)
+    return chosen
+
+
+def bathymetry_path() -> Path | None:
+    """Configured GEBCO NetCDF file/directory; never silently downloads data."""
+    configured = _configured("DRONEVISION_BATHYMETRY", "bathymetry")
+    if configured:
+        return configured
+    for folder in (data_root() / "maps", MAPS_DIR):
+        for pattern in ("GEBCO*.nc", "gebco*.nc"):
+            found = sorted(folder.glob(pattern))
+            if found:
+                return found[0]
+        for candidate in sorted(folder.glob("GEBCO*")):
+            if candidate.is_dir() and (next(candidate.glob("*.nc"), None) or next(candidate.glob("*.nc4"), None)):
+                return candidate
+    return None
 
 
 def coastline_path() -> Path:

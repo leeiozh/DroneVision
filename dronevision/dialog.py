@@ -15,6 +15,7 @@ FILTERS = {
     "video": ("Видео", ("*.MP4", "*.mp4", "*.MOV", "*.mov")),
     "log": ("DJI-логи", ("*.txt", "*.json")),
     "session": ("Сессии DroneVision", ("*.dvsession.json", "*.json")),
+    "bathymetry": ("GEBCO NetCDF", ("*.nc", "*.nc4")),
 }
 
 

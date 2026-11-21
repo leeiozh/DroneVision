@@ -90,7 +90,8 @@ def check(say=print) -> list[str]:
     own = Path(sys.prefix).resolve()
     say(f"  [ok] Python {sys.version.split()[0]}: {sys.executable}"
         + (f" (на основе {sys.base_prefix})" if sys.prefix != sys.base_prefix else ""))
-    for module, package in (("numpy", "numpy"), ("cv2", "opencv-python"), ("pyproj", "pyproj")):
+    for module, package in (("numpy", "numpy"), ("cv2", "opencv-python"), ("pyproj", "pyproj"),
+                            ("netCDF4", "netCDF4")):
         try:
             loaded = __import__(module)
             version = loaded.__version__
@@ -130,6 +131,11 @@ def check(say=print) -> list[str]:
         + ("" if areas else " — «Суша», «Берег» и выравнивание по берегу недоступны"))
     say(f"  [{'ok' if coast['planet'] else '--'}] планетарные полигоны суши OSM: {coast['planet'] or 'не скачаны'}"
         + ("" if coast["planet"] else " (для новых районов: python -m dronevision coastline)"))
+    from .bathymetry import status as bathymetry_status
+    bathymetry = bathymetry_status()
+    say(f"  [{'ok' if bathymetry['available'] else '--'}] батиметрия GEBCO: {bathymetry['path'] or 'не указана'}"
+        + (f" (файлов: {bathymetry['files']})" if bathymetry["available"] else
+           " — выберите свой NetCDF-файл в интерфейсе"))
     say(f"  [{'ok' if root.is_dir() else '--'}] набор DroneData: {root}"
         + ("" if root.is_dir() else f" (не найден; это не мешает работе со своими видео. Путь задаётся в {paths.SETTINGS_FILE.name})"))
     return problems
@@ -148,7 +154,7 @@ def run(target: str | None = None, force: bool = False, say=print) -> int:
     return 1 if problems else 0
 
 
-BUNDLE_ITEMS = ("dronevision", "bin", "maps", "docs", "DroneVision.bat", "DroneVision-check.bat", "README_WINDOWS.txt",
+BUNDLE_ITEMS = ("dronevision", "bin", "maps", "docs", "DroneVision.bat", "DroneVision-check.bat", "DroneVision.sh", "README_WINDOWS.txt",
                 "README.md", "pyproject.toml", "requirements-app.txt", "dronevision_settings.example.json")
 
 
@@ -166,7 +172,8 @@ def bundle(output: str | None = None, say=print) -> Path:
             files = [source] if source.is_file() else sorted(p for p in source.rglob("*") if p.is_file())
             for file in files:
                 # The planet land polygons (~1.4 GB) stay behind: the regional extracts in maps/ are enough.
-                if "__pycache__" in file.parts or file.suffix == ".pyc" or "osm-planet" in file.parts:
+                if ("__pycache__" in file.parts or file.suffix == ".pyc" or "osm-planet" in file.parts
+                        or any(part.upper().startswith("GEBCO") for part in file.parts)):
                     continue
                 archive.write(file, Path("DroneVision") / file.relative_to(paths.APP_DIR))
                 count += 1

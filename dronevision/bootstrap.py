@@ -15,7 +15,8 @@ import subprocess
 import sys
 
 # import name, pip requirement, minimal version
-NEEDED = (("numpy", "numpy>=1.26", (1, 26)), ("cv2", "opencv-python>=4.9", (4, 9)), ("pyproj", "pyproj>=3.6", (3, 6)))
+NEEDED = (("numpy", "numpy>=1.26", (1, 26)), ("cv2", "opencv-python>=4.9", (4, 9)),
+          ("pyproj", "pyproj>=3.6", (3, 6)), ("netCDF4", "netCDF4>=1.7", (1, 7)))
 PINNED = Path(__file__).resolve().parent.parent / "requirements-app.txt"
 
 
@@ -35,8 +36,9 @@ def _probe(module: str, minimum: tuple[int, ...]) -> tuple[str, str, str]:
 
 def _together() -> bool:
     """All libraries in one process: a numpy that does not match the build of cv2 or pyproj fails only here."""
-    code = ("import numpy, cv2, pyproj; "
-            "cv2.resize(numpy.zeros((4, 4, 3), numpy.uint8), (2, 2)); pyproj.Geod(ellps='WGS84').inv(0, 0, 1, 1)")
+    code = ("import numpy, cv2, pyproj, netCDF4; "
+            "cv2.resize(numpy.zeros((4, 4, 3), numpy.uint8), (2, 2)); pyproj.Geod(ellps='WGS84').inv(0, 0, 1, 1); "
+            "netCDF4.getlibversion()")
     return subprocess.run([sys.executable, "-c", code], capture_output=True).returncode == 0
 
 

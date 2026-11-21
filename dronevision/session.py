@@ -36,6 +36,43 @@ def _video(session: dict) -> str:
     return str((session.get("form") or {}).get("video_path") or "")
 
 
+def _relocate_session(session: dict) -> dict:
+    """Rebase a session when its data folder was moved to the configured root.
+
+    Browser tabs can outlive a disk remount and autosave their old absolute path.  If that video
+    no longer exists but the same file is present directly in the currently selected data root,
+    move every path below the old video folder together.  An explicit, still valid path is never
+    changed.
+    """
+    video_text = _video(session)
+    if not video_text:
+        return session
+    old_video = Path(video_text).expanduser()
+    try:
+        if old_video.is_file():
+            return session
+        from .paths import data_root
+        new_root = data_root().expanduser().resolve()
+        new_video = new_root / old_video.name
+        if not new_video.is_file():
+            return session
+    except OSError:
+        return session
+    old_root = str(old_video.parent)
+    new_root_text = str(new_root)
+
+    def rebase(value):
+        if isinstance(value, str) and (value == old_root or value.startswith(old_root + os.sep)):
+            return new_root_text + value[len(old_root):]
+        if isinstance(value, list):
+            return [rebase(item) for item in value]
+        if isinstance(value, dict):
+            return {key: rebase(item) for key, item in value.items()}
+        return value
+
+    return rebase(session)
+
+
 def save_session(session: dict, path: str | None = None, keep_results: bool = False) -> dict:
     """Write the session to ``path`` or, without it, to the last-session file.
 
@@ -44,6 +81,7 @@ def save_session(session: dict, path: str | None = None, keep_results: bool = Fa
     """
     if not isinstance(session, dict):
         raise ValueError("Пустая сессия")
+    session = _relocate_session(session)
     session = {**session, "format": FORMAT, "version": VERSION,
                "saved_at": datetime.now().astimezone().isoformat(timespec="seconds")}
     if path:
@@ -56,7 +94,9 @@ def save_session(session: dict, path: str | None = None, keep_results: bool = Fa
         previous = None
         if target.is_file():
             try:
-                previous = _read(target)
+                # Compare canonical paths: an old browser tab may still autosave the location
+                # used before a removable disk was mounted under a different name.
+                previous = _relocate_session(_read(target))
             except (OSError, ValueError):
                 previous = None
         if previous is not None:
@@ -86,7 +126,7 @@ def load_session(path: str | None = None) -> dict:
         if path:
             raise ValueError(f"Файл не найден: {source}")
         return {"session": None}
-    session = _read(source)
+    session = _relocate_session(_read(source))
     results = dict(session.get("results") or {})
     missing = []
     projection = results.get("projection")

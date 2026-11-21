@@ -83,9 +83,16 @@ DV.lonlat = (grid, e, n) => {
 DV.formatLatLon = p => p ? `${Math.abs(p.lat).toFixed(6)}° ${p.lat >= 0 ? 'N' : 'S'} · ${Math.abs(p.lon).toFixed(6)}° ${p.lon >= 0 ? 'E' : 'W'}` : '';
 
 // --- Overlay switches shared by every projection viewer ---
-DV.overlays = Object.assign({land: false, coast: true, vectors: true}, DV.store.get('dv.overlays', {}));
+DV.overlays = Object.assign({land: false, coast: true, bathymetry: false, vectors: true}, DV.store.get('dv.overlays', {}));
+DV.bathymetry = {levels: DV.store.get('dv.bathymetry.levels', [5, 10, 20, 50, 100]), revision: 0};
 DV.viewers = new Set();
 DV.setOverlay = (key, value) => {DV.overlays[key] = value; DV.store.set('dv.overlays', DV.overlays); DV.viewers.forEach(v => v.syncOverlays())};
+DV.setBathymetryLevels = value => {
+  const levels = [...new Set(String(value).split(/[,;\s]+/).map(Number).filter(v => Number.isFinite(v) && v > 0 && v <= 12000))].sort((a,b) => a-b).slice(0,20);
+  if (!levels.length) return false;
+  DV.bathymetry.levels = levels; DV.bathymetry.revision++; DV.store.set('dv.bathymetry.levels', levels);
+  DV.viewers.forEach(v => v.syncOverlays()); return true;
+};
 
 // --- Annotation store: shapes in ENU metres per image; slot = object id (colour), shared across images ---
 // Designed for the next step (displacement/velocity between two frames): the same slot on two images
@@ -153,6 +160,9 @@ DV.attachTools = view => {
     <div class="swatches" role="group" aria-label="Цвет объекта">${DV.COLORS.map(([c, name], i) => `<button type="button" data-slot="${i}" style="--c:${c}" title="${name}" aria-label="${name}"></button>`).join('')}</div>
     <label class="overlay-check"><input type="checkbox" data-overlay="land"> Суша</label>
     <label class="overlay-check"><input type="checkbox" data-overlay="coast"> Берег</label>
+    <label class="overlay-check" title="Изобаты из локального файла GEBCO"><input type="checkbox" data-overlay="bathymetry"> Батиметрия</label>
+    <label class="bathymetry-levels" title="Глубины изолиний в метрах, через запятую">изобаты, м <input type="text" data-bathymetry-levels value="${DV.bathymetry.levels.join(', ')}" aria-label="Глубины изобат в метрах"></label>
+    <span class="bathymetry-status" data-bathymetry-status></span>
     <label class="overlay-check" title="Полупрозрачные векторы смещения прослеженных контуров и их положение на соседнем кадре"><input type="checkbox" data-overlay="vectors"> Векторы</label>
     <span class="annotate-status"></span>`;
   view.tools.after(bar); bar.after(list); wrap.append(menu); wrap.after(panel);
@@ -166,8 +176,11 @@ DV.attachTools = view => {
     wrap.classList.toggle('drawing-mode', state.mode !== 'pan');
     wrap.classList.toggle('syncing-mode', !!state.syncTarget);
   }
-  function syncOverlays() {bar.querySelectorAll('[data-overlay]').forEach(i => i.checked = !!DV.overlays[i.dataset.overlay]); view.redraw()}
+  function syncOverlays() {bar.querySelectorAll('[data-overlay]').forEach(i => i.checked = !!DV.overlays[i.dataset.overlay]); const levels=bar.querySelector('[data-bathymetry-levels]');if(levels&&document.activeElement!==levels)levels.value=DV.bathymetry.levels.join(', ');view.onOverlayChange?.();view.redraw()}
   bar.querySelectorAll('[data-overlay]').forEach(input => input.onchange = () => DV.setOverlay(input.dataset.overlay, input.checked));
+  const bathymetryLevels=bar.querySelector('[data-bathymetry-levels]');
+  bathymetryLevels.onchange=()=>{if(!DV.setBathymetryLevels(bathymetryLevels.value)){say('Укажите глубины от 1 до 12000 м через запятую.','error');bathymetryLevels.value=DV.bathymetry.levels.join(', ')}};
+  bathymetryLevels.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();bathymetryLevels.blur()}};
   bar.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {setMode(b.dataset.mode); wrap.focus()});
   bar.querySelectorAll('[data-slot]').forEach(b => b.onclick = () => {state.slot = Number(b.dataset.slot); if (state.drawing) state.drawing.slot = state.slot; syncBar(); view.redraw(); wrap.focus()});
   function setMode(mode) {

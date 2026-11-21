@@ -13,5 +13,8 @@ README_WINDOWS.txt text eol=crlf
 *.dbf binary
 *.prj binary
 *.png binary
+*.jpg binary
+*.pdf binary
+*.nc binary
 *.npy binary
 *.mp4 binary

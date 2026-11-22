@@ -68,7 +68,7 @@ rem --- subroutines ------------------------------------------------------------
 
 :venv_works
 if not exist "%VENV_PY%" exit /b 1
-"%VENV_PY%" -c "import numpy, cv2, pyproj, tkinter" >nul 2>&1
+"%VENV_PY%" -c "import numpy, cv2, pyproj, netCDF4, tkinter" >nul 2>&1
 exit /b %errorlevel%
 
 :drop_venv

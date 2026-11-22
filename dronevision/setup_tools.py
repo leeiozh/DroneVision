@@ -173,6 +173,7 @@ def bundle(output: str | None = None, say=print) -> Path:
             for file in files:
                 # The planet land polygons (~1.4 GB) stay behind: the regional extracts in maps/ are enough.
                 if ("__pycache__" in file.parts or file.suffix == ".pyc" or "osm-planet" in file.parts
+                        or file.name.startswith(".~lock.") or file.name.endswith((".part", "~"))
                         or any(part.upper().startswith("GEBCO") for part in file.parts)):
                     continue
                 archive.write(file, Path("DroneVision") / file.relative_to(paths.APP_DIR))

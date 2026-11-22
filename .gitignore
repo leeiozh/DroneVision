@@ -12,6 +12,8 @@ dist/
 Thumbs.db
 desktop.ini
 .DS_Store
+.~lock.*#
+/tmp_ui_*.jpg
 
 # Downloaded on the first start (DroneVision.bat / python -m dronevision setup)
 bin/ffmpeg.exe

@@ -115,6 +115,9 @@ def sync_sidecar(video: Path) -> Path:
 
 
 def _match_log(video: Path, log_directory: str | None) -> dict:
+    from .paths import is_photo
+    if is_photo(video):
+        return _match_photo_log(video, log_directory)
     asset_match = re.search(r"DJI_\d{4}", video.name, re.I)
     asset_id = asset_match.group(0).upper() if asset_match else video.stem
     srt_name = f"{asset_id}.SRT"
@@ -201,6 +204,59 @@ def _match_log(video: Path, log_directory: str | None) -> dict:
               "confidence": "high" if spatial_error < 5 else "low"}
     result.update(_hover_sync(scan, seconds))
     return result
+
+
+def _match_photo_log(photo: Path, log_directory: str | None) -> dict:
+    """Match one geotagged DJI photograph to FlightRecord by EXIF position and local camera time."""
+    from .video import photo_probe
+
+    meta = photo_probe(photo)
+    photo_time = float(meta["creation_time"])
+    latitude, longitude = float(meta["latitude"]), float(meta["longitude"])
+    dataset = _dataset_root(photo)
+    if log_directory:
+        logs = _find_near(photo, directory=log_directory)
+    elif dataset:
+        logs = list((dataset / "telemetry" / "flight_records").glob("*"))
+    else:
+        logs = _find_near(photo)
+    logs = [path for path in logs if path.suffix.lower() in {".txt", ".json"} and "FlightRecord" in path.name]
+    if not log_directory:
+        from .catalog import find_logs
+        known = {path.resolve() for path in logs}
+        date = datetime.fromtimestamp(photo_time, timezone.utc).strftime("%Y-%m-%d")
+        logs += [path for path in find_logs(photo, date) if path.resolve() not in known]
+    if not logs:
+        raise ValueError("Не найден DJIFlightRecord рядом с фотографией или в папке данных")
+
+    candidates = []
+    longitude_scale = 111_000 * np.cos(np.deg2rad(latitude))
+    for source in logs:
+        try:
+            track = _log_track(*_stat_key(source.resolve()))
+            hours = int(round((photo_time - float(np.median(track[:, 0]))) / 3600))
+            if abs(hours) > 14:
+                continue
+            log_time = photo_time - hours * 3600
+            index = int(np.abs(track[:, 0] - log_time).argmin())
+            time_error = float(abs(track[index, 0] - log_time))
+            spatial_error = float(np.hypot((track[index, 1] - latitude) * 111_000,
+                                           (track[index, 2] - longitude) * longitude_scale))
+            # Position identifies the flight; time distinguishes repeated flights over the same site.
+            candidates.append((spatial_error + min(time_error, 600.0) * 0.1,
+                               spatial_error, time_error, source, hours))
+        except Exception:
+            continue
+    if not candidates:
+        raise ValueError("Не удалось сопоставить фотографию с полётными логами")
+    _, spatial_error, time_error, source, hours = min(candidates, key=lambda item: item[0])
+    if time_error > 1800:
+        raise ValueError("В полётных логах нет времени, соответствующего EXIF фотографии")
+    return {"log_path": str(source), "srt_path": None, "utc_offset_hours": hours,
+            "clock_offset_seconds": 0.0, "spatial_error_m": round(spatial_error, 2),
+            "photo_time_error_s": round(time_error, 2),
+            "confidence": "high" if spatial_error < 10 and time_error < 5 else "low",
+            "sync_ambiguous": False}
 
 
 def _hover_sync(scan: list[tuple[float, float]], seconds: float) -> dict:

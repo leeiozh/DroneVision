@@ -91,7 +91,7 @@ def check(say=print) -> list[str]:
     say(f"  [ok] Python {sys.version.split()[0]}: {sys.executable}"
         + (f" (на основе {sys.base_prefix})" if sys.prefix != sys.base_prefix else ""))
     for module, package in (("numpy", "numpy"), ("cv2", "opencv-python"), ("pyproj", "pyproj"),
-                            ("netCDF4", "netCDF4")):
+                            ("netCDF4", "netCDF4"), ("PIL", "Pillow")):
         try:
             loaded = __import__(module)
             version = loaded.__version__

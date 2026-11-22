@@ -58,7 +58,8 @@ def load_context(video_path: str | Path, log_path: str | None = None, utc_offset
         start_epoch = _srt_start_epoch(srt_path)
         profile = camera_profile(srt[:, 4] / 10)
     else:
-        srt, start_epoch, profile = None, meta["creation_time"], "mavic2_zoom"
+        srt, start_epoch = None, meta["creation_time"]
+        profile = camera_profile([float(meta.get("focal_length_35mm") or 24.0)])
     valid = np.isfinite(log["lat"]) & np.isfinite(log["lon"]) & (np.abs(log["lat"]) > 1)
     candidates = np.flatnonzero(valid & (log["time"] <= start_epoch))
     if not len(candidates):
@@ -127,7 +128,8 @@ def frame_poses(context: VideoContext, times_s, geod, yaw_offset_deg: float = 0.
     if context.srt is not None:
         focal_mm = np.interp(times_s, context.srt[:, 0], context.srt[:, 4]) / 10
     else:
-        focal_mm = np.full(times_s.shape, CAMERA_PROFILES[context.profile]["base_focal_mm"])
+        focal_mm = np.full(times_s.shape, float(context.meta.get("focal_length_35mm")
+                                                or CAMERA_PROFILES[context.profile]["base_focal_mm"]))
     width = context.meta["width"]
     focal_px = np.array([focal_length_px(width, f, context.profile, base_horizontal_fov_deg) for f in focal_mm])
     altitude = telemetry["hgt"] + takeoff_height_m

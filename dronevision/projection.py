@@ -16,7 +16,7 @@ from .naming import metadata as naming_metadata, output_stem
 from .pose import enu_offsets, frame_poses, load_context
 from .viewer import safe_media_path
 from .cvio import imread, imwrite, open_video
-from .paths import coastline_path
+from .paths import coastline_path, is_photo
 
 MAX_GROUND_DISTANCE_M = 10_000.0
 MAX_CANVAS_PIXELS = 48_000_000     # same limits as mosaic.py
@@ -206,13 +206,18 @@ def project_selected_frame(video_path: str, time_s: float, project_dir: str,
     pitch, roll = float(pose["pitch"] + correction[1]), float(pose["roll"] + correction[2])
     basis = camera_basis(yaw, pitch, roll)
 
-    cap = open_video(video)
-    try:
-        frame_index = int(round(time_s * meta["fps"]))
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-        ok, frame = cap.read()
-    finally:
-        cap.release()
+    frame_index = int(round(time_s * meta["fps"]))
+    if is_photo(video):
+        frame = imread(video)
+        ok = frame is not None
+        frame_index = 0
+    else:
+        cap = open_video(video)
+        try:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+            ok, frame = cap.read()
+        finally:
+            cap.release()
     if not ok:
         raise RuntimeError(f"Не удалось прочитать кадр {frame_index}")
     height, width = frame.shape[:2]

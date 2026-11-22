@@ -6,3 +6,4 @@ pyproj==3.7.2
 certifi==2026.7.22
 netCDF4==1.7.3
 cftime==1.6.5
+Pillow==13.0.0

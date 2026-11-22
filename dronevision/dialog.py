@@ -12,7 +12,7 @@ import sys
 
 
 FILTERS = {
-    "video": ("Видео", ("*.MP4", "*.mp4", "*.MOV", "*.mov")),
+    "video": ("Видео или фото", ("*.MP4", "*.mp4", "*.MOV", "*.mov", "*.JPG", "*.jpg", "*.JPEG", "*.jpeg")),
     "log": ("DJI-логи", ("*.txt", "*.json")),
     "session": ("Сессии DroneVision", ("*.dvsession.json", "*.json")),
     "bathymetry": ("GEBCO NetCDF", ("*.nc", "*.nc4")),

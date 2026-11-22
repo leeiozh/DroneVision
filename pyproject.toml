@@ -7,7 +7,7 @@ name = "dronevision"
 version = "0.2.0"
 description = "Local drone video georeferencing and mosaicking"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.26", "opencv-python>=4.9", "pyproj>=3.6", "netCDF4>=1.7"]
+dependencies = ["numpy>=1.26", "opencv-python>=4.9", "pyproj>=3.6", "netCDF4>=1.7", "Pillow>=10"]
 
 [project.optional-dependencies]
 science = ["matplotlib>=3.8", "scipy>=1.12", "tqdm>=4.66"]

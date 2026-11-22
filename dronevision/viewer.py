@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 from .discovery import match_log
-from .paths import cache_dir, is_video, run_tool, tool
+from .paths import cache_dir, is_media, is_photo, run_tool, tool
 from .geometry import CAMERA_PROFILES, camera_profile, focal_length_px, horizontal_fov_deg
 from .telemetry import interpolate, read_dji_log
 from .video import probe
@@ -33,8 +33,8 @@ SRT_DATE = re.compile(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),(\d+),(\d+)")
 def safe_media_path(value: str) -> Path:
     path = Path(value).expanduser().resolve()
     # The server listens on 127.0.0.1 only, so any local video may be opened, not just DroneData.
-    if not is_video(path):
-        raise ValueError(f"Видеофайл не найден: {path}")
+    if not is_media(path):
+        raise ValueError(f"Видео или фотография не найдены: {path}")
     return path
 
 
@@ -61,25 +61,33 @@ def viewer_data(video_path: str, max_points: int = 2400) -> dict:
     video = safe_media_path(video_path)
     meta = probe(video)
     matched = match_log(str(video))
-    srt = _srt_series(Path(matched["srt_path"]))
     count = min(max_points, max(2, round(meta["duration"] * 10)))
     timeline = np.linspace(0, meta["duration"], count)
     log = read_dji_log(matched["log_path"], matched["utc_offset_hours"], matched["clock_offset_seconds"])
-    srt_start_epoch = _srt_start_epoch(Path(matched["srt_path"]))
-    epoch = srt_start_epoch + timeline
+    srt_path = matched.get("srt_path")
+    srt = _srt_series(Path(srt_path)) if srt_path else None
+    start_epoch = _srt_start_epoch(Path(srt_path)) if srt_path else meta["creation_time"]
+    epoch = start_epoch + timeline
     values = interpolate(log, epoch)
-    # SRT writes 0/0 while GPS is lost; take the track from the log there (gaps are dead-reckoned).
-    srt_fix = (np.abs(srt[:, 1]) > 1e-3) & (np.abs(srt[:, 2]) > 1e-3)
-    latitude = np.interp(timeline, srt[srt_fix, 0], srt[srt_fix, 1]) if srt_fix.any() else values["lat"]
-    longitude = np.interp(timeline, srt[srt_fix, 0], srt[srt_fix, 2]) if srt_fix.any() else values["lon"]
-    lost = np.interp(timeline, srt[:, 0], (~srt_fix).astype(float)) > 0
-    latitude = np.where(lost, values["lat"], latitude)
-    longitude = np.where(lost, values["lon"], longitude)
+    if srt is not None:
+        # SRT writes 0/0 while GPS is lost; take the track from the log there (gaps are dead-reckoned).
+        srt_fix = (np.abs(srt[:, 1]) > 1e-3) & (np.abs(srt[:, 2]) > 1e-3)
+        latitude = np.interp(timeline, srt[srt_fix, 0], srt[srt_fix, 1]) if srt_fix.any() else values["lat"]
+        longitude = np.interp(timeline, srt[srt_fix, 0], srt[srt_fix, 2]) if srt_fix.any() else values["lon"]
+        lost = np.interp(timeline, srt[:, 0], (~srt_fix).astype(float)) > 0
+        latitude = np.where(lost, values["lat"], latitude)
+        longitude = np.where(lost, values["lon"], longitude)
+        focal_length_mm = np.interp(timeline, srt[:, 0], srt[:, 4]) / 10.0
+        profile = camera_profile(srt[:, 4] / 10.0)
+        altitude_srt = np.interp(timeline, srt[:, 0], srt[:, 3])
+    else:
+        latitude, longitude = values["lat"], values["lon"]
+        focal_length_mm = np.full(timeline.shape, float(meta.get("focal_length_35mm") or 28.0))
+        profile = camera_profile(focal_length_mm)
+        altitude_srt = values["hgt"]
     north = (latitude - latitude[0]) * 111_000
     east = (longitude - longitude[0]) * 111_000 * np.cos(np.deg2rad(float(latitude.mean())))
-    focal_length_mm = np.interp(timeline, srt[:, 0], srt[:, 4]) / 10.0
     # Zoom relative to the camera's base focal length: a video may never be recorded without zoom.
-    profile = camera_profile(srt[:, 4] / 10.0)
     base_focal_mm = CAMERA_PROFILES[profile]["base_focal_mm"]
     hfov = [horizontal_fov_deg(meta["width"], focal_length_px(meta["width"], f, profile)) for f in focal_length_mm]
     gimbal_relative_yaw = (values["yaw_2"] - values["yaw"] + 180.0) % 360.0 - 180.0
@@ -87,9 +95,9 @@ def viewer_data(video_path: str, max_points: int = 2400) -> dict:
         "video": meta,
         "video_path": str(video),
         # Clock of the first frame: the camera's local time written as an epoch; UTC = this - sync.hours.
-        "start_epoch": srt_start_epoch,
+        "start_epoch": start_epoch,
         "log_path": matched["log_path"],
-        "srt_path": matched["srt_path"],
+        "srt_path": srt_path,
         "camera": {"profile": profile, "label": CAMERA_PROFILES[profile]["label"], "base_focal_mm": base_focal_mm},
         # Constant gimbal pitch/roll corrections of this video (<video>.pose.json, see pose.pose_offsets).
         "pose_offsets": _pose_offsets(video),
@@ -100,12 +108,13 @@ def viewer_data(video_path: str, max_points: int = 2400) -> dict:
                  "range_seconds": matched.get("clock_offset_range_seconds"),
                  "note": matched.get("sync_note"),
                  "image_extra_seconds": matched.get("image_sync_extra_s"),
-                 "srt_start_correction_seconds": round(srt_start_epoch - meta["creation_time"], 3)},
+                 "photo_time_error_s": matched.get("photo_time_error_s"),
+                 "srt_start_correction_seconds": round(start_epoch - meta["creation_time"], 3)},
         "series": {
             "time": timeline.round(3).tolist(),
             "latitude": latitude.tolist(), "longitude": longitude.tolist(),
             "position_east": east.tolist(), "position_north": north.tolist(),
-            "altitude_srt": np.interp(timeline, srt[:, 0], srt[:, 3]).tolist(),
+            "altitude_srt": altitude_srt.tolist(),
             "focal_length_mm": focal_length_mm.tolist(),
             "zoom": (focal_length_mm / base_focal_mm).tolist(), "horizontal_fov_deg": hfov,
             "height": values["hgt"].tolist(),
@@ -137,10 +146,12 @@ def ensure_proxy(video_path: str, height: int = 720) -> Path:
         # This is a disposable playback copy, not an export.  Ultrafast H.264 and fast bilinear
         # scaling make the first opening substantially quicker; the result is cached by source
         # path, size and mtime, so subsequent openings do no conversion at all.
-        command = [tool("ffmpeg"), "-y", "-v", "error", "-i", str(source), "-map", "0:v:0",
+        input_options = ["-loop", "1", "-framerate", "1"] if is_photo(source) else []
+        duration_options = ["-t", "1"] if is_photo(source) else []
+        command = [tool("ffmpeg"), "-y", "-v", "error", *input_options, "-i", str(source), "-map", "0:v:0",
                    "-vf", f"scale=-2:{height}:flags=fast_bilinear", "-c:v", "libx264",
                    "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "28",
-                   "-g", "30", "-keyint_min", "30", "-an", "-map_metadata", "0",
+                   "-g", "30", "-keyint_min", "30", "-an", "-map_metadata", "0", *duration_options,
                    "-movflags", "+faststart", str(temporary)]
         result = run_tool(command)
         if result.returncode:

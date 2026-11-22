@@ -24,6 +24,7 @@ USER_SETTINGS_FILE = Path.home() / ".dronevision" / "settings.json"
 COASTLINE_NAME = "coastline_33_34E_66_67N_land_polygons.shp"
 IS_WINDOWS = os.name == "nt"
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
+PHOTO_SUFFIXES = {".jpg", ".jpeg"}
 
 
 def settings() -> dict:
@@ -191,6 +192,14 @@ def cache_dir(name: str) -> Path:
 
 def is_video(path: Path) -> bool:
     return path.suffix.lower() in VIDEO_SUFFIXES and path.is_file()
+
+
+def is_photo(path: Path) -> bool:
+    return path.suffix.lower() in PHOTO_SUFFIXES and path.is_file()
+
+
+def is_media(path: Path) -> bool:
+    return (path.suffix.lower() in VIDEO_SUFFIXES or path.suffix.lower() in PHOTO_SUFFIXES) and path.is_file()
 
 
 def find_tool(name: str) -> str | None:

@@ -45,6 +45,11 @@ def land_directions(lat: float, lon: float, altitude_m: float, geod, create: boo
     box = coastdata.box_around(lat, lon, limit)
     path = coastdata.land_file(box, create)
     if path is None:
+        # The detailed White Sea extract (and user-provided regional maps) may
+        # cover the survey itself without covering the entire horizon radius.
+        # Draw the available nearby shore instead of reporting "no data".
+        path = coastdata.land_file_at(lat, lon)
+    if path is None:
         return None, None
     rings = []
     for ring in coastdata.read_rings(path, box):

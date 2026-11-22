@@ -224,6 +224,23 @@ def land_file_around(lat: float, lon: float, radius_m: float = 70_000.0, create:
     return land_file(box_around(lat, lon, radius_m), create)
 
 
+def land_file_at(lat: float, lon: float) -> Path | None:
+    """Smallest available extract containing the observation point.
+
+    A legacy high-detail extract can be narrower than the full horizon box.  It
+    is still useful for drawing the nearby shore, and must not be discarded
+    merely because the far side of the horizon has no local map coverage.
+    """
+    best, best_area = None, None
+    for path in _candidates():
+        cover = _coverage(path)
+        if cover and cover[0] <= lon <= cover[2] and cover[1] <= lat <= cover[3]:
+            area = (cover[2] - cover[0]) * (cover[3] - cover[1])
+            if best is None or area < best_area:
+                best, best_area = path, area
+    return best
+
+
 def read_rings(path: Path, bbox: tuple[float, float, float, float]) -> list[np.ndarray]:
     """Polygon rings (lon, lat) of the shapes intersecting ``bbox``."""
     data = path.read_bytes()

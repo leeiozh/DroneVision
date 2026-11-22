@@ -513,7 +513,7 @@ def mosaic_selected_frames(video_path: str, times_s, project_dir: str, takeoff_h
                                **naming_metadata(context))
     coastline_layers = []
     try:
-        lines, source = _load_local_coastline(_coastline_bbox(lat0, lon0, minimum, maximum))
+        lines, source = _load_local_coastline(_coastline_bbox(lat0, lon0, minimum, maximum), (lat0, lon0))
         coastline_layers.append({"source": source, "color": "#ff5b45", "lines": _coastline_to_enu(lines, geod, lat0, lon0)})
     except Exception as exc:
         coastline_layers.append({"source": "Локальная береговая линия", "color": "#ff5b45", "lines": [], "error": str(exc)})

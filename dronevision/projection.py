@@ -128,11 +128,24 @@ def _land_file(bbox: tuple[float, float, float, float]) -> Path | None:
     return land_file(bbox)
 
 
-def _load_local_coastline(bbox: tuple[float, float, float, float]) -> tuple[list[list[list[float]]], str]:
+def _load_local_coastline(bbox: tuple[float, float, float, float],
+                          reference: tuple[float, float] | None = None) -> tuple[list[list[list[float]]], str]:
     path = _land_file(bbox)
+    partial = False
+    if path is None and reference is not None:
+        # A wide mosaic can extend beyond a detailed regional extract even
+        # though the survey and its visible shoreline are inside it.  Partial
+        # coverage is safe for an outline; unlike the filled land layer it
+        # cannot invent land outside the map.
+        from .coastdata import land_file_at
+        path = land_file_at(*reference)
+        partial = path is not None
     if path is None:
         return [], "Локальная береговая линия"
-    return _read_shapefile(path.read_bytes(), bbox), "Локальная OSM береговая линия"
+    source = "Локальная OSM береговая линия"
+    if partial:
+        source += " (региональная вырезка)"
+    return _read_shapefile(path.read_bytes(), bbox), source
 
 
 def land_layer(geod, lat0: float, lon0: float, minimum: np.ndarray, maximum: np.ndarray) -> dict:
@@ -249,7 +262,7 @@ def project_selected_frame(video_path: str, time_s: float, project_dir: str,
     bbox = _coastline_bbox(lat0, lon0, minimum, maximum)
     coastline_layers = []
     try:
-        coastline, coastline_source = _load_local_coastline(bbox)
+        coastline, coastline_source = _load_local_coastline(bbox, (lat0, lon0))
         coastline_layers.append({"source": coastline_source, "color": "#ff5b45",
                                  "lines": _coastline_to_enu(coastline, geod, lat0, lon0)})
     except Exception as exc:
@@ -429,7 +442,7 @@ def project_frame_pair(video_path: str, frames: list[dict], project_dir: str,
     lat0, lon0 = variants[0]["takeoff"]["latitude"], variants[0]["takeoff"]["longitude"]
     bbox = _coastline_bbox(lat0, lon0, minimum, maximum)
     try:
-        coastline, source = _load_local_coastline(bbox)
+        coastline, source = _load_local_coastline(bbox, (lat0, lon0))
         coastline_layers = [{"source": source, "color": "#ff5b45",
                              "lines": _coastline_to_enu(coastline, geod, lat0, lon0)}]
     except Exception as exc:

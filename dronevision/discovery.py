@@ -16,6 +16,16 @@ SRT_POINT = re.compile(
     r"\[latitude : ([\d.-]+)\] \[longtitude : ([\d.-]+)\]", re.S)
 
 
+def _is_mount(path: Path) -> bool:
+    """Return whether *path* is a mount point when the platform supports it."""
+    try:
+        return path.is_mount()
+    except (NotImplementedError, OSError):
+        # Mount detection only limits the breadth of the nearby-file search.
+        # Older Python/Windows combinations do not implement this operation.
+        return False
+
+
 def _srt_points(path: Path) -> np.ndarray:
     points = []
     for stamp, lat, lon in SRT_POINT.findall(path.read_text(encoding="utf-8", errors="replace")):
@@ -41,7 +51,7 @@ def _find_near(video: Path, name: str | None = None, directory: str | None = Non
         # Do not enumerate an entire removable disk.  Its immediate child (the folder containing
         # the video) has already been searched, while the catalogue index below handles logs kept
         # elsewhere inside the configured data folder.
-        if index and root.is_mount():
+        if index and _is_mount(root):
             break
         roots.append(root)
     found = []

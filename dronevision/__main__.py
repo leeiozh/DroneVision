@@ -1,8 +1,28 @@
 import argparse
 import json
+import os
+from pathlib import Path
+import sys
+
+
+def _use_project_environment() -> None:
+    """Do not silently run the application with a dependency-less system Python.
+
+    ``DroneVision.sh`` already uses ``.venv`` explicitly, but users also quite
+    reasonably start the program with ``python3 -m dronevision``.  If the local
+    environment has been prepared, transparently continue there so projection
+    handlers see the same OpenCV, pyproj and netCDF4 as the launcher.
+    """
+    if sys.prefix != sys.base_prefix:
+        return
+    root = Path(__file__).resolve().parent.parent
+    executable = root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if executable.is_file():
+        os.execv(str(executable), [str(executable), "-m", "dronevision", *sys.argv[1:]])
 
 
 def main():
+    _use_project_environment()
     parser = argparse.ArgumentParser(prog="dronevision")
     sub = parser.add_subparsers(dest="command", required=True)
     web = sub.add_parser("web", help="Запустить локальный web-интерфейс")
